@@ -1,0 +1,166 @@
+{
+    "version": "1.0",
+    "purpose": "Deep personalization for NeXNet cold email outreach using defensible inference",
+    "axes": {
+        "business_model_reality": {
+            "A1": {
+                "label": "Project-Based Operations",
+                "description": "Work delivered in discrete projects with changing scope and coordination overhead",
+                "industries": [
+                    "construction",
+                    "remodeling",
+                    "agencies",
+                    "consulting"
+                ]
+            },
+            "A2": {
+                "label": "Retainer / Recurring Services",
+                "description": "Ongoing service delivery with recurring client obligations",
+                "industries": [
+                    "professional services",
+                    "marketing agencies",
+                    "managed services"
+                ]
+            },
+            "A3": {
+                "label": "Regulated / Sensitive Data",
+                "description": "Handles confidential, regulated, or client-sensitive information",
+                "industries": [
+                    "healthcare",
+                    "legal",
+                    "finance-adjacent"
+                ]
+            },
+            "A4": {
+                "label": "Ops-Heavy / Coordination-Driven",
+                "description": "Multiple roles, field + office coordination, operational complexity",
+                "industries": [
+                    "logistics",
+                    "multi-role teams",
+                    "field services"
+                ]
+            },
+            "A5": {
+                "label": "Sales-Driven",
+                "description": "Pipeline, outreach, and deal velocity are core to execution",
+                "industries": [
+                    "sales orgs",
+                    "brokerages",
+                    "growth-focused teams"
+                ]
+            },
+            "A6": {
+                "label": "Knowledge / Judgment-Heavy",
+                "description": "Work depends on analysis, writing, decision-making, or expertise",
+                "industries": [
+                    "advisory",
+                    "strategy",
+                    "content-heavy services"
+                ]
+            }
+        },
+        "execution_pressure": {
+            "B1": {
+                "label": "Team Scaling",
+                "signals": [
+                    "hiring posts",
+                    "new roles",
+                    "team growth announcements"
+                ]
+            },
+            "B2": {
+                "label": "Process Formalization",
+                "signals": [
+                    "SOP mentions",
+                    "systems language",
+                    "process discussions"
+                ]
+            },
+            "B3": {
+                "label": "Speed / Throughput Pressure",
+                "signals": [
+                    "turnaround claims",
+                    "delivery speed focus",
+                    "efficiency messaging"
+                ]
+            },
+            "B4": {
+                "label": "Tool Sprawl",
+                "signals": [
+                    "many tools listed",
+                    "stack pages",
+                    "integration mentions"
+                ]
+            },
+            "B5": {
+                "label": "Founder Bottleneck",
+                "signals": [
+                    "founder everywhere",
+                    "centralized decision-making",
+                    "owner-led delivery"
+                ]
+            },
+            "B6": {
+                "label": "Risk / Compliance Awareness",
+                "signals": [
+                    "security posts",
+                    "compliance language",
+                    "risk discussions"
+                ]
+            }
+        }
+    },
+    "matrix_cells": {
+        "A1_B1": {
+            "business_model": "A1",
+            "execution_pressure": "B1",
+            "inference_paragraph": "Teams built around projects tend to move fast as they grow, but I often see people quietly using AI to keep up — drafting client emails, summarizing plans, or organizing scope — before leadership has time to set clear guardrails."
+        },
+        "A1_B3": {
+            "business_model": "A1",
+            "execution_pressure": "B3",
+            "inference_paragraph": "When delivery speed matters, teams naturally look for shortcuts — and AI becomes an easy one. That’s where productivity gains show up quickly, but also where details and data can start flowing in ways owners don’t see."
+        },
+        "A2_B4": {
+            "business_model": "A2",
+            "execution_pressure": "B4",
+            "inference_paragraph": "Retainer-based teams usually layer tools over time to stay responsive. I’ve noticed AI slipping into those workflows informally — helping people respond faster — without a shared understanding of how or where it’s being used."
+        },
+        "A3_B6": {
+            "business_model": "A3",
+            "execution_pressure": "B6",
+            "inference_paragraph": "In regulated environments, teams often adopt AI cautiously — but still informally — especially for documentation or communication speed. That gap between policy and reality is where quiet risk tends to live."
+        },
+        "A4_B5": {
+            "business_model": "A4",
+            "execution_pressure": "B5",
+            "inference_paragraph": "In ops-heavy teams, founders end up being the glue. To keep things moving, people start leaning on AI for summaries, instructions, or coordination — which helps in the moment but usually isn’t visible at the owner level."
+        },
+        "A6_B3": {
+            "business_model": "A6",
+            "execution_pressure": "B3",
+            "inference_paragraph": "Teams doing judgment-heavy work often use AI as a second brain — drafting, analyzing, or refining thinking. That’s powerful, but it also means sensitive context can move through tools leadership hasn’t reviewed."
+        },
+        "A5_B4": {
+            "business_model": "A5",
+            "execution_pressure": "B4",
+            "inference_paragraph": "Sales-driven teams adopt tools aggressively to move faster. AI often ends up embedded in outreach, follow-ups, or deal prep — which creates upside, but also blind spots around data consistency and visibility."
+        },
+        "A2_B5": {
+            "business_model": "A2",
+            "execution_pressure": "B5",
+            "inference_paragraph": "When owners are still deeply involved in delivery, teams tend to self-solve with tools that save time. AI becomes a quiet accelerant — helpful, but usually invisible unless someone looks intentionally."
+        }
+    },
+    "usage_rules": {
+        "max_inference_paragraphs": 1,
+        "email_usage": "email_1_only",
+        "tone": "practical, grounded, non-pretentious",
+        "forbidden_behaviors": [
+            "claiming certainty about private behavior",
+            "stacking multiple inference paragraphs",
+            "accusatory or investigative language",
+            "referencing unverified tool usage"
+        ]
+    }
+}
