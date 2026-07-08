@@ -40,13 +40,16 @@ const ctx = canvas.getContext('2d');
 
 // Logical resolution
 const W = 480, H = 720;
-const WALL = 12;                 // wall thickness
+const WALL = 12;
 const LEFT = WALL, RIGHT = W - WALL, FLOOR = H - 16;
-const DANGER_Y = 150;            // lose if fruit rests above this line
+const DANGER_Y = 150;
 const SPAWN_Y = 95;
 const GRAV = 2000;
-const REST = 0.15;               // restitution
-const DROP_COOLDOWN = 450;       // ms
+const REST = 0.15;
+const DROP_COOLDOWN = 420;      // ms
+const MERGE_T = 0.09;           // s, pull-together phase
+const POP_T = 0.28;             // s, spawn pop-in
+const MOVES_GRACE = 3200;       // ms to let the last drop settle
 
 const TIERS = [
   { r: 15,  c1: '#ff6b81', c2: '#b3232f', score: 1,  name: 'Cherry'     },
@@ -63,20 +66,29 @@ const TIERS = [
 ];
 
 // ---------- state ----------
-let fruits = [];        // {x,y,vx,vy,r,tier,angle,va,age,warn,dead}
-let particles = [];
-let popups = [];
+let fruits = [], particles = [], popups = [], rings = [], mergeAnims = [];
 let score = 0;
 let best = +(localStorage.getItem('fruitMergeBest') || 0);
-let over = false;
-let heldTier, nextTier;
-let aimX = W / 2;
-let canDropTime = 0;
-let shake = 0;
+let bestLevel = +(localStorage.getItem('fruitMergeBestLevel') || 0);
+let level = 1, turnsLeft = 0, goalTier = 5, goalMet = false, scoreAtLevelStart = 0;
+let state = 'intro';            // intro | play | clear | fail | over
+let stateAt = 0;
+let introQueue = [], introIdx = 0, introEndAt = 0;
+let heldTier = 0, nextTier = 0, aimX = W / 2, canDropTime = 0;
+let zeroSince = 0, movesPulseAt = 0, shake = 0;
 let actx = null;
 
+const now = () => performance.now();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function eob(p) {               // easeOutBack, overshoots ~1.1 mid-way
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+}
+
+function setState(s) { state = s; stateAt = now(); }
+
 function randTier() {
-  const w = [30, 25, 20, 15, 10];   // tiers 0-4 only
+  const w = [30, 25, 20, 15, 10];   // droppable tiers 0-4
   let t = Math.random() * 100;
   for (let i = 0; i < w.length; i++) { t -= w[i]; if (t < 0) return i; }
   return 0;
@@ -85,67 +97,142 @@ function randTier() {
 function newFruit(x, y, tier) {
   return { x, y, vx: 0, vy: 0, r: TIERS[tier].r, tier,
            angle: Math.random() * Math.PI * 2, va: 0,
-           age: 0, warn: 0, dead: false };
+           age: 0, warn: 0, dead: false, ghost: false,
+           scale: 1, popT: POP_T, sq: 0, sqa: 0 };
 }
 
-function reset() {
-  fruits = []; particles = []; popups = [];
-  score = 0; over = false; shake = 0;
-  heldTier = randTier(); nextTier = randTier();
-  canDropTime = 0;
+// ---------- levels ----------
+function levelConfig(n) {
+  const goal = Math.min(5 + Math.floor((n - 1) / 2), 10);
+  return {
+    goalTier: goal,
+    turns: Math.max(8, 14 + (goal - 5) * 7 + (n % 2 ? 4 : 0)),
+    prefill: Math.min(10 + n * 2, 24),
+    maxPre: Math.min(2 + Math.floor(n / 3), 4),
+  };
 }
-reset();
+
+function startLevel(n) {
+  level = n;
+  const cfg = levelConfig(n);
+  goalTier = cfg.goalTier;
+  turnsLeft = cfg.turns;
+  goalMet = false;
+  scoreAtLevelStart = score;
+  fruits = []; mergeAnims = []; particles = []; popups = []; rings = [];
+  heldTier = randTier(); nextTier = randTier();
+  canDropTime = 0; shake = 0;
+  // pre-fill rains in from above, staggered
+  introQueue = []; introIdx = 0;
+  let t = 250;
+  for (let i = 0; i < cfg.prefill; i++) {
+    const tier = Math.random() < 0.6
+      ? (Math.random() * 2 | 0)
+      : (Math.random() * (cfg.maxPre + 1) | 0);
+    introQueue.push({ at: t, x: LEFT + 34 + Math.random() * (RIGHT - LEFT - 68), tier });
+    t += 80 + Math.random() * 70;
+  }
+  introEndAt = t + 1300;
+  setState('intro');
+}
 
 // ---------- sound ----------
-function sound(f0, dur, type, vol) {
+function sound(f0, dur, type, vol, ramp = 1.8) {
   if (!actx) return;
   try {
     const t = actx.currentTime;
     const o = actx.createOscillator(), g = actx.createGain();
     o.type = type; o.frequency.setValueAtTime(f0, t);
-    o.frequency.exponentialRampToValueAtTime(f0 * 1.8, t + dur);
+    o.frequency.exponentialRampToValueAtTime(f0 * ramp, t + dur);
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     o.connect(g); g.connect(actx.destination);
     o.start(t); o.stop(t + dur);
   } catch (e) { /* audio is cosmetic */ }
 }
-
-// ---------- merging ----------
-let mergeQueue = [];
-function mergePair(a, b) {
-  a.dead = true; b.dead = true;
-  const ma = a.r * a.r, mb = b.r * b.r, m = ma + mb;
-  const x = (a.x * ma + b.x * mb) / m, y = (a.y * ma + b.y * mb) / m;
-  burst(x, y, TIERS[a.tier].c1, a.r);
-  if (a.tier === TIERS.length - 1) {          // two watermelons vanish
-    score += 200;
-    popups.push({ x, y, text: '+200', t: 0 });
-    shake = 10;
-    sound(120, 0.4, 'sawtooth', 0.2);
-    return;
-  }
-  const t = a.tier + 1;
-  const f = newFruit(x, y, t);
-  f.x = Math.max(LEFT + f.r, Math.min(RIGHT - f.r, f.x));
-  f.y = Math.min(FLOOR - f.r, f.y);
-  f.vx = (a.vx * ma + b.vx * mb) / m;
-  f.vy = (a.vy * ma + b.vy * mb) / m;
-  f.age = 1;                                   // no game-over grace re-run
-  mergeQueue.push(f);
-  score += TIERS[t].score;
-  popups.push({ x, y, text: '+' + TIERS[t].score, t: 0 });
-  sound(220 + t * 60, 0.15, 'triangle', 0.18);
-  if (t >= 8) shake = Math.max(shake, 6);
+function fanfare() {
+  [392, 523, 659, 784].forEach((f, i) =>
+    setTimeout(() => sound(f, 0.22, 'triangle', 0.2, 1.02), i * 110));
 }
 
+// ---------- effects ----------
 function burst(x, y, color, r) {
   const n = Math.min(24, 8 + (r / 6) | 0);
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 220;
     particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60,
-                     r: 2 + Math.random() * 4, c: color, t: 0 });
+                     r: 2 + Math.random() * 4, c: color, t: 0, life: 0.6 });
   }
+}
+function confetti() {
+  for (let i = 0; i < 90; i++) {
+    particles.push({
+      x: W / 2 + (Math.random() - 0.5) * 200, y: 180,
+      vx: (Math.random() - 0.5) * 800, vy: -250 - Math.random() * 450,
+      w: 4 + Math.random() * 5, rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 12,
+      c: TIERS[(Math.random() * TIERS.length) | 0].c1,
+      t: 0, life: 1.3 + Math.random() * 0.6, shape: 'rect',
+    });
+  }
+}
+
+// ---------- merging ----------
+function beginMerge(a, b) {
+  a.ghost = true; b.ghost = true;
+  mergeAnims.push({ a, b, t: 0 });
+}
+
+function finishMerge(m) {
+  const a = m.a, b = m.b;
+  a.dead = true; b.dead = true;
+  fruits = fruits.filter(f => !f.dead);
+  const ma = a.r * a.r, mb = b.r * b.r, mm = ma + mb;
+  const x = (a.x * ma + b.x * mb) / mm, y = (a.y * ma + b.y * mb) / mm;
+  burst(x, y, TIERS[a.tier].c1, a.r);
+  rings.push({ x, y, r0: a.r * 0.6, r1: a.r * 2.3, t: 0, c: TIERS[a.tier].c1 });
+  if (a.tier === TIERS.length - 1) {          // two watermelons vanish
+    score += 200;
+    popups.push({ x, y, text: '+200', t: 0 });
+    shake = 12;
+    sound(120, 0.4, 'sawtooth', 0.22);
+    return;
+  }
+  const t = a.tier + 1;
+  const f = newFruit(x, y, t);
+  f.x = clamp(f.x, LEFT + f.r, RIGHT - f.r);
+  f.y = Math.min(FLOOR - f.r, f.y);
+  f.vx = (a.vx * ma + b.vx * mb) / mm;
+  f.vy = (a.vy * ma + b.vy * mb) / mm;
+  f.age = 1;
+  f.popT = 0;
+  fruits.push(f);
+  score += TIERS[t].score;
+  popups.push({ x, y, text: '+' + TIERS[t].score, t: 0 });
+  sound(220 + t * 60, 0.15, 'triangle', 0.18);
+  if (t >= 8) shake = Math.max(shake, 6);
+  if (state === 'play' && !goalMet && t >= goalTier) levelClear();
+}
+
+function levelClear() {
+  goalMet = true;
+  const bonus = turnsLeft * 5;
+  score += bonus;
+  if (bonus > 0) popups.push({ x: W / 2, y: H / 2 - 100, text: '+' + bonus + ' BONUS', t: 0 });
+  best = Math.max(best, score);
+  bestLevel = Math.max(bestLevel, level);
+  localStorage.setItem('fruitMergeBest', best);
+  localStorage.setItem('fruitMergeBestLevel', bestLevel);
+  confetti();
+  fanfare();
+  shake = 8;
+  setState('clear');
+}
+
+function endLevel(kind) {                     // 'fail' | 'over'
+  best = Math.max(best, score);
+  localStorage.setItem('fruitMergeBest', best);
+  sound(160, 0.5, 'sawtooth', 0.22, 0.5);
+  setState(kind);
 }
 
 // ---------- physics ----------
@@ -153,6 +240,7 @@ function physics(dt) {
   const SUB = 4, h = dt / SUB;
   for (let s = 0; s < SUB; s++) {
     for (const f of fruits) {
+      if (f.ghost) continue;
       f.vy += GRAV * h;
       f.x += f.vx * h; f.y += f.vy * h;
       f.angle += f.va * h;
@@ -161,10 +249,10 @@ function physics(dt) {
     for (let it = 0; it < 3; it++) {
       for (let i = 0; i < fruits.length; i++) {
         const a = fruits[i];
-        if (a.dead) continue;
+        if (a.dead || a.ghost) continue;
         for (let j = i + 1; j < fruits.length; j++) {
           const b = fruits[j];
-          if (b.dead) continue;
+          if (b.dead || b.ghost) continue;
           let dx = b.x - a.x, dy = b.y - a.y;
           const rs = a.r + b.r;
           const d2 = dx * dx + dy * dy;
@@ -172,7 +260,7 @@ function physics(dt) {
           let d = Math.sqrt(d2);
           if (d < 1e-4) { d = 1e-4; dx = 1e-4; dy = 0; }
           const nx = dx / d, ny = dy / d;
-          if (a.tier === b.tier) { mergePair(a, b); break; }
+          if (a.tier === b.tier) { beginMerge(a, b); break; }
           const ima = 1 / (a.r * a.r), imb = 1 / (b.r * b.r);
           const imSum = ima + imb;
           const corr = (rs - d) / imSum * 0.8;
@@ -190,39 +278,40 @@ function physics(dt) {
             a.vx -= jt * tx * ima; a.vy -= jt * ty * ima;
             b.vx += jt * tx * imb; b.vy += jt * ty * imb;
             a.va += vt * 0.004; b.va += vt * 0.004;
+            if (-vn > 300) {                  // squash on hard impact
+              const sq = Math.min(0.22, -vn / 2600);
+              const sqa = Math.atan2(ny, nx);
+              if (sq > a.sq) { a.sq = sq; a.sqa = sqa; }
+              if (sq > b.sq) { b.sq = sq; b.sqa = sqa; }
+            }
           }
         }
       }
-      // walls & floor
       for (const f of fruits) {
-        if (f.dead) continue;
+        if (f.dead || f.ghost) continue;
         if (f.x - f.r < LEFT)  { f.x = LEFT + f.r;  if (f.vx < 0) f.vx *= -REST; }
         if (f.x + f.r > RIGHT) { f.x = RIGHT - f.r; if (f.vx > 0) f.vx *= -REST; }
         if (f.y + f.r > FLOOR) {
           f.y = FLOOR - f.r;
-          if (f.vy > 0) f.vy *= -REST;
+          if (f.vy > 0) {
+            if (f.vy > 300) { f.sq = Math.max(f.sq, Math.min(0.25, f.vy / 2400)); f.sqa = Math.PI / 2; }
+            f.vy *= -REST;
+          }
           f.vx *= 0.985;
           f.va = f.vx / f.r;
         }
-      }
-      if (mergeQueue.length) {
-        fruits = fruits.filter(f => !f.dead);
-        fruits.push(...mergeQueue);
-        mergeQueue = [];
       }
     }
     for (const f of fruits) f.va *= 0.995;
   }
 
-  // game-over: fruit resting above the danger line
-  for (const f of fruits) {
-    if (f.age > 0.8 && f.y - f.r < DANGER_Y) f.warn += dt;
-    else f.warn = 0;
-    if (f.warn > 0.9 && !over) {
-      over = true;
-      best = Math.max(best, score);
-      localStorage.setItem('fruitMergeBest', best);
-      sound(90, 0.6, 'sawtooth', 0.25);
+  // overflow game-over: only while actively playing
+  if (state === 'play') {
+    for (const f of fruits) {
+      if (f.ghost) continue;
+      if (f.age > 0.8 && f.y - f.r < DANGER_Y) f.warn += dt;
+      else f.warn = 0;
+      if (f.warn > 0.9) { endLevel('over'); break; }
     }
   }
 }
@@ -230,7 +319,7 @@ function physics(dt) {
 // ---------- input ----------
 function clampAim(x, tier) {
   const r = TIERS[tier].r;
-  return Math.max(LEFT + r, Math.min(RIGHT - r, x));
+  return clamp(x, LEFT + r, RIGHT - r);
 }
 
 function canvasX(e) {
@@ -239,13 +328,24 @@ function canvasX(e) {
 }
 
 function drop() {
-  if (over || performance.now() < canDropTime) return;
+  if (state !== 'play' || turnsLeft <= 0 || now() < canDropTime) return;
   const x = clampAim(aimX, heldTier);
   fruits.push(newFruit(x, SPAWN_Y, heldTier));
   heldTier = nextTier;
   nextTier = randTier();
-  canDropTime = performance.now() + DROP_COOLDOWN;
+  canDropTime = now() + DROP_COOLDOWN;
+  turnsLeft--;
+  movesPulseAt = now();
+  if (turnsLeft === 0) zeroSince = now();
   sound(320, 0.07, 'sine', 0.1);
+}
+
+function advance() {                          // tap on an overlay
+  if (state === 'clear') startLevel(level + 1);
+  else if (state === 'fail' || state === 'over') {
+    score = scoreAtLevelStart;                // no farming failed levels
+    startLevel(level);
+  }
 }
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -254,83 +354,133 @@ canvas.addEventListener('pointerdown', e => {
     try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
     catch (err) { actx = null; }
   }
-  if (over) { reset(); return; }
-  aimX = canvasX(e);
+  if (state === 'play') aimX = canvasX(e);
+  else if (state !== 'intro' && now() - stateAt > 500) advance();
 });
-canvas.addEventListener('pointermove', e => { if (!over) aimX = canvasX(e); });
+canvas.addEventListener('pointermove', e => { if (state === 'play') aimX = canvasX(e); });
 canvas.addEventListener('pointerup', e => {
-  if (!over) { aimX = canvasX(e); drop(); }
+  if (state === 'play') { aimX = canvasX(e); drop(); }
 });
 window.addEventListener('keydown', e => {
-  if (over) { if (e.key === ' ' || e.key === 'Enter') reset(); return; }
-  if (e.key === 'ArrowLeft')  aimX -= 18;
-  if (e.key === 'ArrowRight') aimX += 18;
-  if (e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); drop(); }
+  if (state === 'play') {
+    if (e.key === 'ArrowLeft')  aimX -= 18;
+    if (e.key === 'ArrowRight') aimX += 18;
+    if (e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); drop(); }
+  } else if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    if (state !== 'intro' && now() - stateAt > 500) advance();
+  }
 });
 
 // ---------- drawing ----------
 function drawFruit(f, alpha) {
   const T = TIERS[f.tier];
+  let s = f.scale;
+  if (f.popT < POP_T) s *= 0.45 + 0.55 * eob(f.popT / POP_T);
+  const r = f.r * s;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(f.x, f.y);
+  if (f.sq > 0.005) {                          // squash along impact normal
+    ctx.rotate(f.sqa);
+    ctx.scale(1 - f.sq, 1 + f.sq);
+    ctx.rotate(-f.sqa);
+  }
 
-  const g = ctx.createRadialGradient(-f.r * 0.35, -f.r * 0.35, f.r * 0.1, 0, 0, f.r);
+  const g = ctx.createRadialGradient(-r * 0.35, -r * 0.35, r * 0.1, 0, 0, r);
   g.addColorStop(0, T.c1);
   g.addColorStop(1, T.c2);
   ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.arc(0, 0, f.r, 0, Math.PI * 2);
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
 
-  // highlight
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.beginPath();
-  ctx.ellipse(-f.r * 0.35, -f.r * 0.42, f.r * 0.28, f.r * 0.16, -0.6, 0, Math.PI * 2);
+  ctx.ellipse(-r * 0.35, -r * 0.42, r * 0.28, r * 0.16, -0.6, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.rotate(f.angle);
 
-  // leaf + stem
   ctx.fillStyle = '#2d8a3e';
   ctx.beginPath();
-  ctx.ellipse(f.r * 0.18, -f.r * 0.88, f.r * 0.22, f.r * 0.11, 0.6, 0, Math.PI * 2);
+  ctx.ellipse(r * 0.18, -r * 0.88, r * 0.22, r * 0.11, 0.6, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = '#6b4a2b';
-  ctx.lineWidth = Math.max(1.5, f.r * 0.06);
+  ctx.lineWidth = Math.max(1.5, r * 0.06);
   ctx.beginPath();
-  ctx.moveTo(0, -f.r * 0.75);
-  ctx.lineTo(0, -f.r * 0.98);
+  ctx.moveTo(0, -r * 0.75);
+  ctx.lineTo(0, -r * 0.98);
   ctx.stroke();
 
-  // face
-  const er = Math.max(1.5, f.r * 0.07);
+  const er = Math.max(1.5, r * 0.07);
   ctx.fillStyle = 'rgba(40,20,20,0.85)';
-  ctx.beginPath(); ctx.arc(-f.r * 0.28, -f.r * 0.05, er, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc( f.r * 0.28, -f.r * 0.05, er, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-r * 0.28, -r * 0.05, er, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc( r * 0.28, -r * 0.05, er, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = 'rgba(40,20,20,0.85)';
-  ctx.lineWidth = Math.max(1.5, f.r * 0.05);
+  ctx.lineWidth = Math.max(1.5, r * 0.05);
   ctx.beginPath();
-  ctx.arc(0, f.r * 0.12, f.r * 0.22, 0.25, Math.PI - 0.25);
+  ctx.arc(0, r * 0.12, r * 0.22, 0.25, Math.PI - 0.25);
   ctx.stroke();
 
   ctx.restore();
 }
 
-function draw(now) {
+function miniFruit(x, y, tier) {
+  drawFruit({ x, y, r: Math.min(15, TIERS[tier].r), tier,
+              angle: 0, scale: 1, popT: POP_T, sq: 0, sqa: 0 }, 1);
+}
+
+function landingY(x, r) {
+  let y = FLOOR - r;
+  for (const f of fruits) {
+    if (f.dead || f.ghost) continue;
+    const dx = f.x - x, rr = f.r + r;
+    if (Math.abs(dx) < rr) {
+      const yy = f.y - Math.sqrt(rr * rr - dx * dx);
+      if (yy < y) y = yy;
+    }
+  }
+  return Math.max(y, SPAWN_Y);
+}
+
+function overlayText(tNow, title, sub1, sub2) {
+  ctx.fillStyle = 'rgba(10,5,20,0.68)';
+  ctx.fillRect(0, 0, W, H);
+  const p = clamp((tNow - stateAt) / 350, 0, 1);
+  const sc = 0.6 + 0.4 * eob(p);
+  ctx.save();
+  ctx.translate(W / 2, H / 2 - 60);
+  ctx.scale(sc, sc);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 44px system-ui, sans-serif';
+  ctx.fillText(title, 0, 0);
+  ctx.restore();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 26px system-ui, sans-serif';
+  ctx.fillStyle = '#ffe38a';
+  ctx.fillText(sub1, W / 2, H / 2 - 8);
+  ctx.font = '17px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillText(sub2, W / 2, H / 2 + 28);
+  if ((tNow / 600 | 0) % 2 === 0) {
+    ctx.fillText(state === 'clear' ? 'Tap to continue' : 'Tap to retry', W / 2, H / 2 + 76);
+  }
+}
+
+function draw(tNow) {
   ctx.save();
   if (shake > 0.5) {
     ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
   }
 
-  // background
   const bg = ctx.createLinearGradient(0, 0, 0, H);
   bg.addColorStop(0, '#2b1a4d');
   bg.addColorStop(1, '#160d29');
   ctx.fillStyle = bg;
   ctx.fillRect(-20, -20, W + 40, H + 40);
 
-  // container
   ctx.fillStyle = '#f6e3b8';
   ctx.fillRect(0, DANGER_Y - 30, WALL, H);
   ctx.fillRect(W - WALL, DANGER_Y - 30, WALL, H);
@@ -339,46 +489,78 @@ function draw(now) {
   ctx.fillRect(LEFT, DANGER_Y - 30, RIGHT - LEFT, FLOOR - DANGER_Y + 30);
 
   // danger line
-  const nearDanger = fruits.some(f => f.y - f.r < DANGER_Y + 90 && f.age > 0.5);
-  const warning = fruits.some(f => f.warn > 0.15);
-  if (nearDanger || warning) {
-    ctx.strokeStyle = warning && (now / 150 | 0) % 2 === 0
-      ? 'rgba(255,60,60,0.95)' : 'rgba(255,120,120,0.45)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([10, 8]);
-    ctx.beginPath();
-    ctx.moveTo(LEFT, DANGER_Y);
-    ctx.lineTo(RIGHT, DANGER_Y);
-    ctx.stroke();
-    ctx.setLineDash([]);
+  if (state === 'play') {
+    const nearDanger = fruits.some(f => !f.ghost && f.y - f.r < DANGER_Y + 90 && f.age > 0.5);
+    const warning = fruits.some(f => f.warn > 0.15);
+    if (nearDanger || warning) {
+      ctx.strokeStyle = warning && (tNow / 150 | 0) % 2 === 0
+        ? 'rgba(255,60,60,0.95)' : 'rgba(255,120,120,0.45)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.moveTo(LEFT, DANGER_Y);
+      ctx.lineTo(RIGHT, DANGER_Y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
-  // aim guide + held fruit
-  if (!over) {
+  // aim guide, landing preview, held fruit
+  if (state === 'play' && turnsLeft > 0) {
     const hx = clampAim(aimX, heldTier);
-    const cooling = performance.now() < canDropTime;
+    const hr = TIERS[heldTier].r;
+    const cooling = tNow < canDropTime;
+    const ly = landingY(hx, hr);
     ctx.strokeStyle = 'rgba(255,255,255,0.18)';
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 10]);
     ctx.beginPath();
     ctx.moveTo(hx, SPAWN_Y);
-    ctx.lineTo(hx, FLOOR);
+    ctx.lineTo(hx, ly);
     ctx.stroke();
     ctx.setLineDash([]);
-    drawFruit({ x: hx, y: SPAWN_Y, r: TIERS[heldTier].r, tier: heldTier, angle: 0 },
+    if (!cooling) {                            // ghost of landing spot
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(hx, ly, hr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    const ap = cooling ? 1 : clamp((tNow - canDropTime) / 220, 0, 1);
+    drawFruit({ x: hx, y: SPAWN_Y, r: hr, tier: heldTier, angle: 0,
+                scale: cooling ? 0.8 : 0.8 + 0.2 * eob(ap), popT: POP_T, sq: 0, sqa: 0 },
               cooling ? 0.35 : 1);
   }
 
-  // fruits
   for (const f of fruits) drawFruit(f, 1);
 
-  // particles
-  for (const p of particles) {
-    ctx.globalAlpha = Math.max(0, 1 - p.t / 0.6);
-    ctx.fillStyle = p.c;
+  // rings
+  for (const g of rings) {
+    const p = g.t / 0.35;
+    ctx.globalAlpha = Math.max(0, 1 - p);
+    ctx.strokeStyle = g.c;
+    ctx.lineWidth = 1 + 3 * (1 - p);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.arc(g.x, g.y, g.r0 + (g.r1 - g.r0) * (1 - Math.pow(1 - p, 3)), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // particles & confetti
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+    ctx.fillStyle = p.c;
+    if (p.shape === 'rect') {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillRect(-p.w / 2, -p.w / 4, p.w, p.w / 2);
+      ctx.restore();
+    } else {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 
@@ -386,81 +568,147 @@ function draw(now) {
   ctx.textAlign = 'center';
   ctx.font = 'bold 22px system-ui, sans-serif';
   for (const p of popups) {
-    ctx.globalAlpha = Math.max(0, 1 - p.t / 0.9);
+    const q = p.t / 0.9;
+    ctx.globalAlpha = Math.max(0, 1 - q);
     ctx.fillStyle = '#ffe38a';
-    ctx.fillText(p.text, p.x, p.y - p.t * 50);
+    ctx.fillText(p.text, p.x, p.y - 50 * (1 - Math.pow(1 - q, 2)));
   }
   ctx.globalAlpha = 1;
 
-  // HUD
+  // ----- HUD -----
   ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = 'bold 12px system-ui, sans-serif';
+  ctx.fillText('LEVEL ' + level, 22, 26);
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 30px system-ui, sans-serif';
-  ctx.fillText(score, 24, 44);
-  ctx.font = '14px system-ui, sans-serif';
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  ctx.fillText('BEST ' + best, 24, 66);
-
-  // next preview
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = 'bold 28px system-ui, sans-serif';
+  ctx.fillText(score, 22, 54);
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
   ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText('NEXT', W - 46, 26);
-  const nr = Math.min(16, TIERS[nextTier].r);
-  drawFruit({ x: W - 46, y: 48, r: nr, tier: nextTier, angle: 0 }, 1);
+  ctx.fillText('BEST ' + best, 22, 72);
 
-  // evolution chart
-  let cx = W / 2 - 92;
-  for (let i = 0; i < TIERS.length; i++) {
-    const rr = 4 + i * 1.1;
-    ctx.fillStyle = TIERS[i].c1;
-    ctx.beginPath();
-    ctx.arc(cx, 30, rr, 0, Math.PI * 2);
-    ctx.fill();
-    cx += rr * 2 + 4;
+  // moves countdown, center
+  const mp = clamp((tNow - movesPulseAt) / 250, 0, 1);
+  const msize = 34 * (1 + 0.3 * (1 - mp));
+  ctx.textAlign = 'center';
+  if (turnsLeft <= 3 && state === 'play') {
+    const k = 0.5 + 0.5 * Math.sin(tNow / 120);
+    ctx.fillStyle = 'rgb(255,' + (70 + 100 * k | 0) + ',' + (70 + 100 * k | 0) + ')';
+  } else {
+    ctx.fillStyle = '#fff';
+  }
+  ctx.font = 'bold ' + msize + 'px system-ui, sans-serif';
+  ctx.fillText(turnsLeft, W / 2, 48);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = 'bold 11px system-ui, sans-serif';
+  ctx.fillText('MOVES', W / 2, 66);
+
+  // goal + next, right
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = 'bold 11px system-ui, sans-serif';
+  ctx.fillText('GOAL', W - 116, 26);
+  ctx.fillText('NEXT', W - 46, 26);
+  miniFruit(W - 116, 48, goalTier);
+  miniFruit(W - 46, 48, nextTier);
+  if (goalMet) {
+    ctx.fillStyle = '#7bed9f';
+    ctx.font = 'bold 20px system-ui, sans-serif';
+    ctx.fillText('✓', W - 98, 38);
   }
 
-  // game over
-  if (over) {
-    ctx.fillStyle = 'rgba(10,5,20,0.72)';
-    ctx.fillRect(0, 0, W, H);
+  // intro banner
+  if (state === 'intro' || (state === 'play' && tNow - stateAt < 1200)) {
+    const a = state === 'intro'
+      ? clamp((tNow - stateAt) / 300, 0, 1)
+      : 1 - clamp((tNow - stateAt) / 1200, 0, 1);
+    ctx.globalAlpha = a;
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 46px system-ui, sans-serif';
-    ctx.fillText('Game Over', W / 2, H / 2 - 60);
-    ctx.font = 'bold 30px system-ui, sans-serif';
+    ctx.font = 'bold 42px system-ui, sans-serif';
+    ctx.fillText('LEVEL ' + level, W / 2, H * 0.36);
+    ctx.font = 'bold 21px system-ui, sans-serif';
     ctx.fillStyle = '#ffe38a';
-    ctx.fillText(score + ' pts', W / 2, H / 2 - 10);
-    ctx.font = '18px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillText('Best: ' + best, W / 2, H / 2 + 24);
-    if ((now / 600 | 0) % 2 === 0) {
-      ctx.fillText('Tap or press Space to restart', W / 2, H / 2 + 70);
-    }
+    ctx.fillText('Make ' + (goalTier === 4 || goalTier === 5 ? 'an ' : 'a ')
+                 + TIERS[goalTier].name + ' in ' + levelConfig(level).turns + ' moves!',
+                 W / 2, H * 0.36 + 38);
+    ctx.globalAlpha = 1;
+  }
+
+  // overlays
+  if (state === 'clear') {
+    overlayText(tNow, 'Level ' + level + ' Clear!', score + ' pts',
+                'Next: make ' + TIERS[levelConfig(level + 1).goalTier].name);
+  } else if (state === 'fail') {
+    overlayText(tNow, 'Out of Moves', 'Goal: ' + TIERS[goalTier].name,
+                'Score: ' + score + '  ·  Best: ' + best);
+  } else if (state === 'over') {
+    overlayText(tNow, 'Overflow!', 'The tray filled up',
+                'Score: ' + score + '  ·  Best: ' + best);
   }
 
   ctx.restore();
 }
 
 // ---------- main loop ----------
-let last = performance.now();
-function frame(now) {
-  let dt = Math.min((now - last) / 1000, 1 / 30);
-  last = now;
+let last = now();
+function frame(tNow) {
+  let dt = Math.min((tNow - last) / 1000, 1 / 30);
+  last = tNow;
 
-  if (!over) physics(dt);
+  // rain in the pre-fill
+  if (state === 'intro') {
+    while (introIdx < introQueue.length && tNow - stateAt >= introQueue[introIdx].at) {
+      const q = introQueue[introIdx++];
+      const f = newFruit(q.x, -30, q.tier);
+      f.vx = (Math.random() - 0.5) * 120;
+      f.popT = POP_T;
+      fruits.push(f);
+    }
+    if (introIdx >= introQueue.length && tNow - stateAt > introEndAt) setState('play');
+  }
 
+  physics(dt);
+
+  // two-phase merge: pull together, then pop
+  for (const m of mergeAnims) {
+    m.t += dt;
+    const p = Math.min(1, m.t / MERGE_T);
+    const e = p * p;
+    const ma = m.a.r * m.a.r, mb = m.b.r * m.b.r, mm = ma + mb;
+    const cx = (m.a.x * ma + m.b.x * mb) / mm, cy = (m.a.y * ma + m.b.y * mb) / mm;
+    m.a.x += (cx - m.a.x) * e; m.a.y += (cy - m.a.y) * e;
+    m.b.x += (cx - m.b.x) * e; m.b.y += (cy - m.b.y) * e;
+    m.a.scale = m.b.scale = 1 - 0.25 * p;
+    if (m.t >= MERGE_T) finishMerge(m);
+  }
+  mergeAnims = mergeAnims.filter(m => m.t < MERGE_T);
+
+  // out of moves (after the last drop has had time to settle & merge)
+  if (state === 'play' && turnsLeft === 0 && !goalMet
+      && mergeAnims.length === 0 && tNow - zeroSince > MOVES_GRACE) {
+    endLevel('fail');
+  }
+  // auto-advance a cleared level
+  if (state === 'clear' && tNow - stateAt > 4500) startLevel(level + 1);
+
+  for (const f of fruits) {
+    f.popT += dt;
+    f.sq *= Math.exp(-dt * 9);
+  }
   for (const p of particles) {
     p.t += dt;
     p.vy += 900 * dt;
     p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.rot !== undefined) p.rot += p.vr * dt;
   }
-  particles = particles.filter(p => p.t < 0.6);
+  particles = particles.filter(p => p.t < p.life);
   for (const p of popups) p.t += dt;
   popups = popups.filter(p => p.t < 0.9);
+  for (const g of rings) g.t += dt;
+  rings = rings.filter(g => g.t < 0.35);
   shake = Math.max(0, shake - dt * 30);
 
-  draw(now);
+  draw(tNow);
   requestAnimationFrame(frame);
 }
 
@@ -472,7 +720,14 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+startLevel(1);
 requestAnimationFrame(frame);
+
+// tiny debug/testing handle
+window.__fm = {
+  info: () => ({ state, level, turnsLeft, goalTier, goalMet, score, fruits: fruits.length }),
+  skip: n => startLevel(n),
+};
 
 })();
 </script>
