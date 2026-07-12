@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Echo — journal your world</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📓</text></svg>">
+<style>
+  :root {
+    --bg: #12141c; --panel: #1a1d29; --panel2: #212536; --line: #2c3147;
+    --text: #e8e9f0; --muted: #8b90a8; --accent: #e8a852; --accent2: #7aa2f7;
+    --good: #6dbf7e; --flame: #ff8a3d;
+    --person: #7aa2f7; --place: #6dbf7e; --project: #e8a852; --activity: #c792ea;
+    --event: #ff7a93; --organization: #4fd6be; --other: #8b90a8;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 16px/1.6 Georgia, 'Times New Roman', serif;
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 16px 28px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+  }
+  header h1 { font-size: 22px; font-weight: normal; font-style: italic; letter-spacing: 1px; }
+  header h1 span { color: var(--accent); }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button {
+    background: none; border: 1px solid transparent; color: var(--muted);
+    font: 15px Georgia, serif; padding: 7px 16px; border-radius: 20px; cursor: pointer;
+  }
+  nav button.active { color: var(--text); border-color: var(--line); background: var(--panel); }
+  nav button:hover { color: var(--text); }
+  #streakBadge {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 20px;
+    font-size: 15px;
+  }
+  #streakBadge b { color: var(--flame); }
+  main { max-width: 980px; margin: 0 auto; padding: 28px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px; margin-bottom: 18px;
+  }
+  h2 { font-weight: normal; font-style: italic; font-size: 20px; margin-bottom: 14px; color: var(--accent); }
+  h3 { font-weight: normal; font-size: 16px; color: var(--muted); margin-bottom: 8px; }
+
+  /* prompts */
+  .prompt {
+    display: flex; gap: 10px; align-items: baseline; padding: 10px 14px;
+    background: var(--panel2); border-radius: 8px; margin-bottom: 8px; cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .prompt:hover { border-color: var(--accent); }
+  .prompt .tag { font-size: 11px; color: var(--muted); font-family: sans-serif; text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0; }
+  .prompt .x { margin-left: auto; color: var(--muted); flex-shrink: 0; padding: 0 4px; }
+  .prompt .x:hover { color: var(--text); }
+
+  /* editor */
+  input[type=text], textarea, select {
+    width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+    font: 16px/1.6 Georgia, serif;
+  }
+  textarea { min-height: 220px; resize: vertical; }
+  .row { display: flex; gap: 12px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+  .moods { display: flex; gap: 6px; }
+  .moods button {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    font-size: 20px; padding: 6px 10px; cursor: pointer; opacity: .45;
+  }
+  .moods button.sel { opacity: 1; border-color: var(--accent); }
+  .btn {
+    background: var(--accent); color: #1a1408; border: none; border-radius: 8px;
+    font: 16px Georgia, serif; padding: 11px 26px; cursor: pointer;
+  }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  #wordCount { color: var(--muted); font-size: 14px; margin-left: auto; }
+
+  .reflection {
+    border-left: 3px solid var(--accent2); background: var(--panel2);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; font-style: italic; color: #c6cbe6;
+  }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 12px 22px; z-index: 50; box-shadow: 0 8px 30px rgba(0,0,0,.5);
+    animation: pop .25s ease;
+  }
+  @keyframes pop { from { transform: translateX(-50%) translateY(14px); opacity: 0; } }
+
+  /* entries list */
+  .entry { cursor: pointer; }
+  .entry .meta { color: var(--muted); font-size: 13px; font-family: sans-serif; display: flex; gap: 12px; flex-wrap: wrap; }
+  .entry h4 { font-weight: normal; font-size: 18px; margin: 4px 0 6px; }
+  .entry p { color: #b9bdd1; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .chip {
+    font: 12px sans-serif; padding: 3px 10px; border-radius: 12px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip.person { color: var(--person); border-color: var(--person); }
+  .chip.place { color: var(--place); border-color: var(--place); }
+  .chip.project { color: var(--project); border-color: var(--project); }
+  .chip.activity { color: var(--activity); border-color: var(--activity); }
+  .chip.event { color: var(--event); border-color: var(--event); }
+  .chip.organization { color: var(--organization); border-color: var(--organization); }
+
+  /* graph */
+  #graphWrap { position: relative; }
+  #graphCanvas { width: 100%; height: 560px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); display: block; }
+  #graphInfo {
+    position: absolute; top: 12px; left: 12px; background: rgba(18,20,28,.9);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px;
+    font-size: 14px; max-width: 280px; display: none;
+  }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font: 13px sans-serif; color: var(--muted); }
+  .legend span::before { content: '●'; margin-right: 5px; }
+  .legend .lg-person::before { color: var(--person); } .legend .lg-place::before { color: var(--place); }
+  .legend .lg-project::before { color: var(--project); } .legend .lg-activity::before { color: var(--activity); }
+  .legend .lg-event::before { color: var(--event); } .legend .lg-organization::before { color: var(--organization); }
+  .legend .lg-other::before { color: var(--other); }
+
+  /* progress */
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .stat { background: var(--panel2); border-radius: 10px; padding: 16px; text-align: center; }
+  .stat .num { font-size: 30px; color: var(--accent); }
+  .stat .lbl { font: 12px sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .xpbar { height: 10px; background: var(--panel2); border-radius: 5px; overflow: hidden; margin: 8px 0 4px; }
+  .xpbar div { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 5px; transition: width .6s ease; }
+  .badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .badge {
+    display: flex; gap: 10px; align-items: center; background: var(--panel2);
+    border-radius: 10px; padding: 12px; border: 1px solid var(--line);
+  }
+  .badge.locked { opacity: .35; filter: grayscale(1); }
+  .badge .e { font-size: 26px; }
+  .badge .n { font-size: 14px; }
+  .badge .d { font: 12px sans-serif; color: var(--muted); }
+  #histChart { display: flex; gap: 5px; align-items: flex-end; height: 90px; }
+  .histbar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+  .histbar .bar { width: 100%; background: var(--accent2); border-radius: 3px 3px 0 0; min-height: 3px; opacity: .35; }
+  .histbar.has .bar { opacity: 1; background: var(--good); }
+  .histbar .d { font: 10px sans-serif; color: var(--muted); }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  dialog {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 14px; padding: 26px; max-width: 640px; width: 90vw;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.65); }
+  dialog .close { float: right; background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Echo <span>·</span> journal your world</h1>
+  <div id="streakBadge">🔥 <b id="streakNum">0</b>&nbsp;day streak</div>
+  <nav>
+    <button data-view="write" class="active">Write</button>
+    <button data-view="journal">Journal</button>
+    <button data-view="graph">Graph</button>
+    <button data-view="progress">Progress</button>
+  </nav>
+</header>
+
+<main>
+  <!-- WRITE -->
+  <section id="view-write" class="view active">
+    <div class="card">
+      <h2>Need a spark?</h2>
+      <div id="promptList"><div class="empty">Loading prompts…</div></div>
+    </div>
+    <div class="card">
+      <h2>Today's entry</h2>
+      <input type="text" id="title" placeholder="Title (optional)">
+      <div style="height:10px"></div>
+      <textarea id="content" placeholder="What happened? Who was there? How did it feel?"></textarea>
+      <div class="row">
+        <div class="moods" id="moods">
+          <button data-m="1">😞</button><button data-m="2">😕</button>
+          <button data-m="3">😐</button><button data-m="4">🙂</button>
+          <button data-m="5">😄</button>
+        </div>
+        <input type="date" id="entryDate" style="width:auto">
+        <span id="wordCount">0 words</span>
+        <button class="btn" id="saveBtn">Save entry</button>
+      </div>
+    </div>
+    <div class="card" id="reflectionCard" style="display:none">
+      <h2>A moment to reflect</h2>
+      <div class="reflection" id="reflectionText"></div>
+    </div>
+  </section>
+
+  <!-- JOURNAL -->
+  <section id="view-journal" class="view">
+    <div id="entryList"></div>
+  </section>
+
+  <!-- GRAPH -->
+  <section id="view-graph" class="view">
+    <div class="card">
+      <h2>Your world</h2>
+      <p style="color:var(--muted);margin-bottom:12px">Every person, place, and project from your entries — connected the way your life connects them. Drag nodes; hover for details.</p>
+      <div id="graphWrap">
+        <canvas id="graphCanvas"></canvas>
+        <div id="graphInfo"></div>
+      </div>
+      <div class="legend">
+        <span class="lg-person">people</span><span class="lg-place">places</span>
+        <span class="lg-project">projects</span><span class="lg-activity">activities</span>
+        <span class="lg-event">events</span><span class="lg-organization">orgs</span>
+        <span class="lg-other">other</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROGRESS -->
+  <section id="view-progress" class="view">
+    <div class="card">
+      <h2 id="levelTitle">Level 1 · New Page</h2>
+      <div class="xpbar"><div id="xpFill" style="width:0%"></div></div>
+      <div style="font:13px sans-serif;color:var(--muted)" id="xpLabel"></div>
+    </div>
+    <div class="card">
+      <h2>Last 14 days</h2>
+      <div id="histChart"></div>
+    </div>
+    <div class="card"><div class="statgrid" id="statGrid"></div></div>
+    <div class="card">
+      <h2>Achievements</h2>
+      <div class="badges" id="badgeGrid"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="entryDialog"></dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (path, opts) => fetch(path, opts).then(r => r.json());
+const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MOODS = {1:'😞',2:'😕',3:'😐',4:'🙂',5:'😄'};
+
+/* ---------- navigation ---------- */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  $('#view-' + b.dataset.view).classList.add('active');
+  if (b.dataset.view === 'journal') loadEntries();
+  if (b.dataset.view === 'graph') loadGraph();
+  if (b.dataset.view === 'progress') loadStats();
+});
+
+/* ---------- write ---------- */
+let mood = null;
+$('#entryDate').value = new Date().toISOString().slice(0, 10);
+$('#moods').querySelectorAll('button').forEach(b => b.onclick = () => {
+  const already = b.classList.contains('sel');
+  $('#moods').querySelectorAll('button').forEach(x => x.classList.remove('sel'));
+  mood = already ? null : +b.dataset.m;
+  if (!already) b.classList.add('sel');
+});
+$('#content').addEventListener('input', () => {
+  const n = $('#content').value.trim().split(/\s+/).filter(Boolean).length;
+  $('#wordCount').textContent = n + ' words';
+});
+
+function toast(html, ms = 3500) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.innerHTML = html;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), ms);
+}
+
+$('#saveBtn').onclick = async () => {
+  const content = $('#content').value.trim();
+  if (!content) return toast('Write something first ✍️');
+  const btn = $('#saveBtn');
+  btn.disabled = true; btn.textContent = 'Reading…';
+  try {
+    const res = await api('/api/entries', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title: $('#title').value, content,
+        mood, entry_date: $('#entryDate').value,
+      }),
+    });
+    if (res.error) return toast(esc(res.error));
+    $('#title').value = ''; $('#content').value = '';
+    $('#wordCount').textContent = '0 words';
+    mood = null; $('#moods').querySelectorAll('button').forEach(x => x.classList.remove('sel'));
+    if (res.reflection) {
+      $('#reflectionCard').style.display = '';
+      $('#reflectionText').textContent = res.reflection;
+    }
+    updateStreak(res.stats);
+    let msg = '✅ Entry saved';
+    if (res.new_entities) msg += ` · ${res.new_entities} new ${res.new_entities === 1 ? 'entity' : 'entities'} mapped`;
+    toast(msg);
+    (res.new_achievements || []).forEach((a, i) =>
+      setTimeout(() => toast(`${a.emoji} Achievement unlocked: <b>${esc(a.name)}</b>`), 900 * (i + 1)));
+    loadPrompts();
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save entry';
+  }
+};
+
+function updateStreak(stats) {
+  if (stats?.streak) $('#streakNum').textContent = stats.streak.current;
+}
+
+/* ---------- prompts ---------- */
+async function loadPrompts() {
+  const res = await api('/api/prompts');
+  const box = $('#promptList');
+  if (!res.prompts?.length) { box.innerHTML = '<div class="empty">Write an entry and prompts will appear here.</div>'; return; }
+  box.innerHTML = res.prompts.map(p => `
+    <div class="prompt" data-id="${p.id}" data-text="${esc(p.text)}">
+      <span class="tag">${p.source === 'ai' ? '✦ ai' : p.source === 'graph' ? '◈ graph' : '☼'}</span>
+      <span>${esc(p.text)}</span>
+      <span class="x" title="dismiss">×</span>
+    </div>`).join('');
+  box.querySelectorAll('.prompt').forEach(el => {
+    el.onclick = e => {
+      if (e.target.classList.contains('x')) {
+        api(`/api/prompts/${el.dataset.id}/dismiss`, {method: 'POST'});
+        el.remove();
+        return;
+      }
+      const ta = $('#content');
+      ta.value = (ta.value ? ta.value + '\n\n' : '') + el.dataset.text + '\n';
+      ta.focus();
+      ta.dispatchEvent(new Event('input'));
+    };
+  });
+}
+
+/* ---------- journal list ---------- */
+async function loadEntries() {
+  const res = await api('/api/entries');
+  const box = $('#entryList');
+  if (!res.entries?.length) { box.innerHTML = '<div class="card"><div class="empty">No entries yet — your story starts on the Write tab.</div></div>'; return; }
+  box.innerHTML = res.entries.map(e => `
+    <div class="card entry" data-id="${e.id}">
+      <div class="meta">
+        <span>${e.entry_date}</span>
+        ${e.mood ? `<span>${MOODS[e.mood]}</span>` : ''}
+        <span>${e.word_count} words</span>
+      </div>
+      ${e.title ? `<h4>${esc(e.title)}</h4>` : ''}
+      <p>${esc(e.preview)}${e.preview.length >= 240 ? '…' : ''}</p>
+      <div class="chips">${e.entities.map(x => `<span class="chip ${x.type}">${esc(x.name)}</span>`).join('')}</div>
+    </div>`).join('');
+  box.querySelectorAll('.entry').forEach(el => el.onclick = () => openEntry(el.dataset.id));
+}
+
+async function openEntry(id) {
+  const e = await api('/api/entries/' + id);
+  const d = $('#entryDialog');
+  d.innerHTML = `
+    <button class="close" onclick="this.closest('dialog').close()">×</button>
+    <div class="meta" style="color:var(--muted);font:13px sans-serif">${e.entry_date} ${e.mood ? '· ' + MOODS[e.mood] : ''} · ${e.word_count} words</div>
+    ${e.title ? `<h2 style="margin-top:6px">${esc(e.title)}</h2>` : ''}
+    <p style="white-space:pre-wrap;margin-top:12px">${esc(e.content)}</p>
+    ${e.reflection ? `<div class="reflection" style="margin-top:16px">${esc(e.reflection)}</div>` : ''}
+    <div class="chips" style="margin-top:14px">${e.entities.map(x => `<span class="chip ${x.type}">${esc(x.name)}</span>`).join('')}</div>`;
+  d.showModal();
+}
+
+/* ---------- graph (canvas force layout) ---------- */
+let G = null, sim = null;
+async function loadGraph() {
+  const data = await api('/api/graph');
+  const canvas = $('#graphCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = 560;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const colors = getComputedStyle(document.documentElement);
+  const colorFor = t => colors.getPropertyValue('--' + t).trim() || '#8b90a8';
+
+  const nodes = data.nodes.map(n => ({
+    ...n,
+    x: W / 2 + (Math.random() - .5) * W * .6,
+    y: H / 2 + (Math.random() - .5) * H * .6,
+    vx: 0, vy: 0,
+    r: 6 + Math.min(14, Math.sqrt(n.mention_count) * 3),
+  }));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const links = data.links.filter(l => byId[l.source] && byId[l.target]);
+
+  if (sim) cancelAnimationFrame(sim);
+  let dragging = null, hover = null, alpha = 1;
+
+  function tick() {
+    // forces
+    if (alpha > 0.005) {
+      alpha *= 0.985;
+      for (const n of nodes) { n.vx *= .85; n.vy *= .85; }
+      // repulsion
+      for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy || 1;
+        if (d2 < 90000) {
+          const f = 2200 / d2 * alpha;
+          const d = Math.sqrt(d2);
+          dx /= d; dy /= d;
+          a.vx -= dx * f; a.vy -= dy * f; b.vx += dx * f; b.vy += dy * f;
+        }
+      }
+      // springs
+      for (const l of links) {
+        const a = byId[l.source], b = byId[l.target];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        const want = 110 - Math.min(40, l.weight * 6);
+        const f = (d - want) / d * 0.04 * alpha * Math.min(3, l.weight);
+        a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
+      }
+      // gravity + integrate
+      for (const n of nodes) {
+        n.vx += (W / 2 - n.x) * 0.002 * alpha;
+        n.vy += (H / 2 - n.y) * 0.002 * alpha;
+        if (n !== dragging) { n.x += n.vx; n.y += n.vy; }
+        n.x = Math.max(n.r, Math.min(W - n.r, n.x));
+        n.y = Math.max(n.r, Math.min(H - n.r, n.y));
+      }
+    }
+
+    // draw
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineWidth = 1;
+    for (const l of links) {
+      const a = byId[l.source], b = byId[l.target];
+      ctx.strokeStyle = (hover && (hover === a || hover === b)) ? '#e8a852' : '#2c3147';
+      ctx.lineWidth = Math.min(4, .5 + l.weight * .5);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    for (const n of nodes) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+      ctx.fillStyle = colorFor(n.type);
+      ctx.globalAlpha = hover && hover !== n && !links.some(l =>
+        (l.source === hover.id && l.target === n.id) || (l.target === hover.id && l.source === n.id)) ? .3 : 1;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      if (n.r > 8 || hover === n) {
+        ctx.fillStyle = '#e8e9f0';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.name, n.x, n.y - n.r - 5);
+      }
+    }
+    sim = requestAnimationFrame(tick);
+  }
+  tick();
+
+  const pos = e => {
+    const rect = canvas.getBoundingClientRect();
+    return {x: e.clientX - rect.left, y: e.clientY - rect.top};
+  };
+  const nodeAt = p => nodes.find(n => (n.x - p.x) ** 2 + (n.y - p.y) ** 2 < (n.r + 4) ** 2);
+
+  canvas.onmousedown = e => { dragging = nodeAt(pos(e)); if (dragging) alpha = Math.max(alpha, .3); };
+  canvas.onmouseup = () => dragging = null;
+  canvas.onmousemove = e => {
+    const p = pos(e);
+    if (dragging) { dragging.x = p.x; dragging.y = p.y; alpha = Math.max(alpha, .1); }
+    hover = nodeAt(p);
+    canvas.style.cursor = hover ? 'pointer' : 'default';
+    const info = $('#graphInfo');
+    if (hover) {
+      const deg = links.filter(l => l.source === hover.id || l.target === hover.id);
+      info.style.display = 'block';
+      info.innerHTML = `<b>${esc(hover.name)}</b> <span style="color:var(--muted)">(${hover.type})</span><br>
+        mentioned ${hover.mention_count}×<br>
+        ${deg.length ? deg.slice(0, 5).map(l => {
+          const other = byId[l.source === hover.id ? l.target : l.source];
+          return `<span style="color:var(--muted)">${esc(l.label)}</span> ${esc(other.name)}`;
+        }).join('<br>') : '<span style="color:var(--muted)">no connections yet</span>'}`;
+    } else info.style.display = 'none';
+  };
+
+  if (!nodes.length) {
+    ctx.fillStyle = '#8b90a8'; ctx.font = 'italic 16px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('Your world will appear here as you write.', W / 2, H / 2);
+    cancelAnimationFrame(sim);
+  }
+}
+
+/* ---------- progress ---------- */
+async function loadStats() {
+  const s = await api('/api/stats');
+  updateStreak(s);
+  $('#levelTitle').textContent = `Level ${s.level.level} · ${s.level.name}`;
+  $('#xpFill').style.width = Math.round(s.level.progress * 100) + '%';
+  $('#xpLabel').textContent = s.level.next_level_xp
+    ? `${s.level.xp} XP — ${s.level.next_level_xp - s.level.xp} to next level`
+    : `${s.level.xp} XP — max level!`;
+  $('#statGrid').innerHTML = [
+    [s.streak.current, 'current streak'], [s.streak.longest, 'longest streak'],
+    [s.totals.entries, 'entries'], [s.totals.words.toLocaleString(), 'words written'],
+    [s.totals.entities, 'entities'], [s.totals.relationships, 'connections'],
+  ].map(([n, l]) => `<div class="stat"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
+  const max = Math.max(1, ...s.history.map(h => h.count));
+  $('#histChart').innerHTML = s.history.map(h => `
+    <div class="histbar ${h.count ? 'has' : ''}">
+      <div class="bar" style="height:${Math.max(4, h.count / max * 70)}px"></div>
+      <div class="d">${h.date.slice(8)}</div>
+    </div>`).join('');
+  $('#badgeGrid').innerHTML = s.achievements.map(a => `
+    <div class="badge ${a.unlocked ? '' : 'locked'}">
+      <div class="e">${a.emoji}</div>
+      <div><div class="n">${esc(a.name)}</div><div class="d">${esc(a.description)}</div></div>
+    </div>`).join('');
+}
+
+/* ---------- init ---------- */
+loadPrompts();
+api('/api/stats').then(updateStreak);
+</script>
+</body>
+</html>

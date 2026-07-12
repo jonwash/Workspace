@@ -1,0 +1,3 @@
+# Optional — enables Claude-powered extraction, reflections, and prompts.
+# The app runs without this using deterministic fallbacks.
+anthropic
