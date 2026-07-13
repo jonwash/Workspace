@@ -10,22 +10,23 @@ XP_PER_NEW_ENTITY = 5
 
 LEVELS = [0, 30, 80, 160, 280, 450, 700, 1050, 1500, 2100, 2900]
 LEVEL_NAMES = [
-    "New Page", "Notetaker", "Scribe", "Chronicler", "Storyteller",
+    "New page", "Notetaker", "Scribe", "Chronicler", "Storyteller",
     "Memoirist", "Historian", "Sage", "Archivist", "Loremaster", "Legend",
 ]
 
+# (icon, name, condition) — icons are Lucide glyph names from the design system
 ACHIEVEMENTS = {
-    "first_entry":   ("🌱", "First Words", "Write your first entry"),
-    "entries_5":     ("📖", "Getting Into It", "Write 5 entries"),
-    "entries_25":    ("📚", "Shelf Space", "Write 25 entries"),
-    "streak_3":      ("🔥", "Kindling", "3-day streak"),
-    "streak_7":      ("🔥", "On Fire", "7-day streak"),
-    "streak_30":     ("🌋", "Unstoppable", "30-day streak"),
-    "wordsmith":     ("✒️", "Wordsmith", "Write a 500+ word entry"),
-    "cast_10":       ("👥", "Ensemble Cast", "10 entities in your world"),
-    "cast_50":       ("🌐", "Whole World", "50 entities in your world"),
-    "connector_10":  ("🕸️", "Connector", "10 relationships mapped"),
-    "connector_50":  ("🧠", "Mind Mapper", "50 relationships mapped"),
+    "first_entry":   ("sprout",    "First words", "Write your first entry"),
+    "entries_5":     ("book-open", "Getting into it", "Write 5 entries"),
+    "entries_25":    ("calendar",  "Shelf space", "Write 25 entries"),
+    "streak_3":      ("leaf",      "Taking root", "A 3-day streak"),
+    "streak_7":      ("sun",       "One week", "A 7-day streak"),
+    "streak_30":     ("moon",      "A full moon", "A 30-day streak"),
+    "wordsmith":     ("feather",   "Wordsmith", "Write a 500-word entry"),
+    "cast_10":       ("user",      "Ensemble cast", "10 names in your world"),
+    "cast_50":       ("map-pin",   "Whole world", "50 names in your world"),
+    "connector_10":  ("share-2",   "Connector", "10 relationships mapped"),
+    "connector_50":  ("activity",  "Mind mapper", "50 relationships mapped"),
 }
 
 
@@ -120,9 +121,9 @@ def stats(conn):
 
     unlocked = {r["key"]: r["unlocked_at"] for r in conn.execute("SELECT * FROM achievements")}
     achievements = [
-        {"key": k, "emoji": e, "name": n, "description": d,
+        {"key": k, "icon": i, "name": n, "description": d,
          "unlocked": k in unlocked, "unlocked_at": unlocked.get(k)}
-        for k, (e, n, d) in ACHIEVEMENTS.items()
+        for k, (i, n, d) in ACHIEVEMENTS.items()
     ]
 
     # Last 14 days of activity for the consistency chart.

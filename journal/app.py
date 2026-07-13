@@ -60,7 +60,7 @@ def create_entry(payload):
                 "reflection": extraction.get("reflection"),
                 "new_entities": new_entities,
                 "new_achievements": [
-                    {"key": k, "emoji": gamification.ACHIEVEMENTS[k][0],
+                    {"key": k, "icon": gamification.ACHIEVEMENTS[k][0],
                      "name": gamification.ACHIEVEMENTS[k][1]}
                     for k in new_achievements
                 ],
