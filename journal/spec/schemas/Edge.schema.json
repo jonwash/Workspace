@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://echo.app/schemas/Edge.schema.json",
+  "title": "Edge",
+  "description": "A relationship between two entities — a link in the knowledge graph. Stored undirected (source_id < target_id).",
+  "type": "object",
+  "required": ["source", "target", "label", "weight"],
+  "properties": {
+    "source": { "type": "integer", "description": "Entity id (the smaller of the pair)." },
+    "target": { "type": "integer", "description": "Entity id (the larger of the pair)." },
+    "label": {
+      "type": "string",
+      "description": "Short lowercase relationship label, e.g. 'works with', 'lives in', 'appears with'."
+    },
+    "weight": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of times this labeled relationship has been observed; drives edge thickness."
+    },
+    "last_seen": { "type": "string", "description": "UTC timestamp of the most recent observation." }
+  }
+}

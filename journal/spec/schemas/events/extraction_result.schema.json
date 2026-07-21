@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://echo.app/schemas/events/extraction_result.schema.json",
+  "title": "ExtractionResult",
+  "description": "The structured result the AI layer (journal/ai.py) returns for one entry. When ANTHROPIC_API_KEY is set this is enforced by Claude via output_config.format with this exact shape; the offline fallback produces the same shape. Consumed by graph.upsert_extraction to grow the knowledge graph.",
+  "type": "object",
+  "required": ["entities", "relationships", "reflection"],
+  "additionalProperties": false,
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "description": "Shortest natural name for the entity." },
+          "type": { "$ref": "../Entity.schema.json#/$defs/entityType" }
+        }
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "label"],
+        "additionalProperties": false,
+        "properties": {
+          "source": { "type": "string", "description": "Entity name (must match an extracted entity)." },
+          "target": { "type": "string", "description": "Entity name (must match an extracted entity)." },
+          "label": { "type": "string", "description": "Short lowercase relationship label." }
+        }
+      }
+    },
+    "reflection": {
+      "type": "string",
+      "description": "2-3 warm, second-person sentences ending in one follow-up question."
+    }
+  }
+}

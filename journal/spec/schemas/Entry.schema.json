@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://echo.app/schemas/Entry.schema.json",
+  "title": "Entry",
+  "description": "A single journal entry as persisted and returned by GET /api/entries/{id}.",
+  "type": "object",
+  "required": ["id", "entry_date", "content", "word_count"],
+  "properties": {
+    "id": { "type": "integer", "description": "Auto-increment primary key." },
+    "created_at": { "type": "string", "description": "UTC timestamp the row was inserted (YYYY-MM-DD HH:MM:SS)." },
+    "entry_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "The day the entry is about (may be backdated). Defaults to today."
+    },
+    "title": { "type": ["string", "null"], "description": "Optional title." },
+    "content": { "type": "string", "minLength": 1, "description": "The entry body." },
+    "mood": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Optional mood, 1 (a hard day) to 5 (a bright day)."
+    },
+    "word_count": { "type": "integer", "minimum": 0 },
+    "reflection": {
+      "type": ["string", "null"],
+      "description": "The AI (or fallback) reflection generated at save time."
+    },
+    "entities": {
+      "type": "array",
+      "description": "Entities mentioned in this entry (id + name + type).",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "type": { "$ref": "Entity.schema.json#/$defs/entityType" }
+        }
+      }
+    }
+  }
+}

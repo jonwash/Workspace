@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://echo.app/schemas/Entity.schema.json",
+  "title": "Entity",
+  "description": "A person, place, project, etc. extracted from entries — a node in the knowledge graph.",
+  "type": "object",
+  "required": ["id", "name", "type", "mention_count"],
+  "$defs": {
+    "entityType": {
+      "type": "string",
+      "enum": ["person", "place", "organization", "project", "activity", "event", "other"],
+      "description": "The seven entity types. Drives node/chip color and the graph legend."
+    }
+  },
+  "properties": {
+    "id": { "type": "integer" },
+    "name": { "type": "string", "description": "Shortest natural name, unique case-insensitively." },
+    "type": { "$ref": "#/$defs/entityType" },
+    "first_seen": { "type": "string", "description": "UTC timestamp the entity was first created." },
+    "last_seen": { "type": "string", "description": "UTC timestamp of the most recent mention." },
+    "mention_count": { "type": "integer", "minimum": 1, "description": "How many entries mention it; drives node size." }
+  }
+}

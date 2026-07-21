@@ -131,6 +131,16 @@ The design system ("warm paper & ink", candlelit dark mode, Newsreader/Karla,
 a 7-hue entity palette) was developed in Claude Design and lives inline in the
 frontend. Details in [`journal/README.md`](journal/README.md).
 
+## Product spec
+
+Echo has a full **agent-consumable product spec** in
+[`journal/spec/`](journal/spec/) — a narrative PRD, a machine-actionable
+`product_spec.yaml` (user stories, acceptance criteria, UX flows), an OpenAPI
+contract, JSON Schemas for the domain objects, and an **executable evaluation
+protocol**: [`journal/tests/acceptance.py`](journal/tests/acceptance.py) boots
+the app and asserts all 24 acceptance criteria against the live API. Agents
+working in this repo start from [`AGENTS.md`](AGENTS.md).
+
 ---
 
 > **Note on this repository:** the hackathon project is **Echo**, in

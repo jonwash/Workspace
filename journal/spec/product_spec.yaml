@@ -1,0 +1,283 @@
+# product_spec.yaml — Echo
+# Machine-actionable product spec. Validated by product_spec.schema.json.
+# Narrative rationale lives in PRD.md; API/data contracts in openapi.yaml + schemas/.
+# Calibrated to Echo's real scale (single-user, local-first, zero runtime deps) —
+# heavier governance (perf gates, provenance, formal telemetry) is noted as
+# "applies at scale" rather than cargo-culted onto a small app.
+
+spec_version: "1.0"
+id: "PSPEC-echo-core"
+title: "Echo — AI journaling with a knowledge graph"
+owner:
+  product: "Echo"
+  engineering: "Echo"
+
+autonomy:
+  level: "semi_autonomous"
+  allowed_actions:
+    - "modify_code"
+    - "run_tests"
+    - "open_pr"
+  forbidden_actions:
+    - "merge_to_main"
+    - "deploy"
+    - "add_runtime_dependency"   # the shipped app must stay stdlib + SQLite only
+    - "modify_user_entries"      # the AI never edits or fabricates a user's words
+
+parameters:
+  target_languages: ["python>=3.9", "html", "css", "javascript"]
+  runtime_dependencies: "none (Python standard library + SQLite)"
+  dev_dependencies: ["anthropic (optional, enables live AI)", "pyyaml + jsonschema (spec validation only)"]
+  scale: "single user, single process, one SQLite file; hundreds of entries"
+  deployment_environment: "local-first (localhost); optionally one hosted instance"
+  ai:
+    model: "claude-opus-4-8"
+    sdk: "anthropic (Python)"
+    structured_output: "output_config.format (JSON schema) — see schemas/events/extraction_result.schema.json"
+    fallback: "deterministic, offline — every AI call has one; app is fully functional with no key"
+
+purpose:
+  problem_statement: >
+    Journaling apps stop at a text box and a streak. The writing goes in and
+    nothing comes back — no synthesis, no memory.
+  user_value: >
+    Echo reads each entry, maps the people/places/projects and their
+    relationships into a knowledge graph, reflects back, and uses the graph to
+    generate the next prompts — a journal that grows more personal with use.
+  non_goals:
+    - "No accounts, sharing, or multi-user data (single-user, private)."
+    - "Not a task manager or note app; entries are reflective."
+    - "No full-text search yet; browse by entry, entity, and graph."
+    - "The AI never fabricates or edits the user's words."
+
+scope:
+  in_scope_flows: ["F1-write-reflect", "F2-explore-graph", "F3-entity-story", "F4-look-back", "F5-progress"]
+  out_of_scope:
+    - "Authentication / multi-tenancy"
+    - "Cloud sync / real-time collaboration"
+  allowed_subsystems:
+    - "journal/*.py"
+    - "journal/static/index.html"
+    - "journal/spec/*"
+    - "journal/tests/*"
+  security_boundaries:
+    network_access: "only the Anthropic API, only when ANTHROPIC_API_KEY is set"
+    secrets_required: false           # runs with no secret; key is optional
+    secrets_policy: "ANTHROPIC_API_KEY read from env only; never logged, never written to the DB or responses"
+    data_classification: "entry content is sensitive; local-first, no analytics/telemetry in the shipped app"
+
+users:
+  personas:
+    - id: "p1"
+      name: "The reflective writer"
+      needs: ["a nightly ritual that helps make sense of the day"]
+    - id: "p2"
+      name: "The lapsed journaler"
+      needs: ["an encouraging reason to return without guilt"]
+    - id: "p3"
+      name: "The life cartographer"
+      needs: ["to see the shape of their relationships and projects over time"]
+
+stories:
+  - id: "US-1"
+    story: "As a writer, I want to save an entry and get a reflection, so that writing helps me process the day."
+    priority: "must"
+    acceptance:
+      - "AC-1.1: POST /api/entries with non-empty content returns 200 and an `entry` with an integer id and the submitted content."
+      - "AC-1.2: The response includes a non-empty `reflection` string (AI when keyed, deterministic fallback otherwise)."
+      - "AC-1.3: POST /api/entries with empty/missing content returns 400 with an `error` message and creates nothing."
+      - "AC-1.4: `mood` outside 1..5 and malformed `entry_date` are coerced (mood dropped to null; date to today), not rejected."
+
+  - id: "US-2"
+    story: "As a writer, I want my entries parsed into people/places/projects, so that a map of my life builds itself."
+    priority: "must"
+    acceptance:
+      - "AC-2.1: After saving an entry that names entities, GET /api/graph returns them as `nodes` with a `type` in the 7-type enum."
+      - "AC-2.2: Entities recur across entries by case-insensitive name — a second mention increments `mention_count`, it does not create a duplicate node."
+      - "AC-2.3: Co-mentioned entities produce an `edge` in `links` with a `label` and `weight >= 1`; a repeated pairing increments `weight`."
+      - "AC-2.4: The extraction result conforms to schemas/events/extraction_result.schema.json in both AI and fallback modes."
+
+  - id: "US-3"
+    story: "As a cartographer, I want to open any entity and see its story, so that my journal becomes a queryable memory."
+    priority: "must"
+    acceptance:
+      - "AC-3.1: GET /api/entities/{id} returns the entity with `connections` (labeled, weighted) and `entries` (every entry that mentions it)."
+      - "AC-3.2: `since` equals the entry_date of the earliest entry mentioning the entity."
+      - "AC-3.3: GET /api/entities/{unknown} returns 404 with an `error`."
+
+  - id: "US-4"
+    story: "As a returning user, I want streaks, levels, and achievements, so that consistency feels rewarding."
+    priority: "must"
+    acceptance:
+      - "AC-4.1: GET /api/stats returns `streak.current`, `level` (1..11 with a name), `totals`, `achievements` (11 items), and `history` (exactly 14 days)."
+      - "AC-4.2: A streak stays alive if the latest entry is today or yesterday; a gap of 2+ days resets `current` to 0."
+      - "AC-4.3: Writing the first entry unlocks the `first_entry` achievement; unlock is idempotent (never fires twice)."
+      - "AC-4.4: XP = 10/entry + 1 per 50 words (max 20/entry) + 5 per new entity; level is derived from XP via the LEVELS thresholds."
+
+  - id: "US-5"
+    story: "As a writer, I want prompts drawn from my own graph, so that the app knows what to ask me next."
+    priority: "must"
+    acceptance:
+      - "AC-5.1: GET /api/prompts returns `prompts[]` (each with a stable `id`, `text`, and `source` in {graph, ai, starter}) and an `ai` boolean."
+      - "AC-5.2: With entities present, at least one prompt has source `graph` and its `text` names a real entity."
+      - "AC-5.3: POST /api/prompts/{id}/dismiss hides that prompt from subsequent GET /api/prompts responses."
+      - "AC-5.4: A brand-new (empty) journal returns `starter` prompts, never an empty list."
+
+  - id: "US-6"
+    story: "As a user on any device, I want a private, dependency-free app, so that I can run it anywhere and trust it with my journal."
+    priority: "must"
+    acceptance:
+      - "AC-6.1: `python3 app.py` starts and serves the SPA at / with zero pip installs."
+      - "AC-6.2: With no ANTHROPIC_API_KEY, every endpoint still returns 200 and entities are still extracted (heuristically)."
+      - "AC-6.3: No entry content or secret is written to stdout/stderr in normal operation."
+
+ux:
+  flows:
+    - id: "F1-write-reflect"
+      name: "Write & reflect"
+      preconditions: ["app loaded"]
+      steps:
+        - step_id: "s1"
+          state: "write_view"
+          action: "user types content (+ optional title, mood, backdate) and saves (button or Cmd/Ctrl+Enter)"
+          inputs: { content: "string(non-empty)", title: "string?", mood: "int 1..5 ?", entry_date: "YYYY-MM-DD?" }
+          expected_outputs:
+            api: [{ endpoint_ref: "op:CreateEntry", expected_status: 200 }]
+            ui: ["reflection card appears", "toast shows N new entities", "achievement toasts for any unlocks", "prompt list refreshes"]
+        - step_id: "s2"
+          state: "save_failed"
+          action: "network/API error on save"
+          expected_outputs:
+            ui: ["recovery toast shown", "editor content preserved (not cleared)"]
+    - id: "F2-explore-graph"
+      name: "Explore your world"
+      preconditions: ["at least one entity exists"]
+      steps:
+        - step_id: "s1"
+          state: "graph_view"
+          action: "drag a node; hover/tap a node; tap legend chip to filter a type"
+          expected_outputs:
+            api: [{ endpoint_ref: "op:GetGraph", expected_status: 200 }]
+            ui: ["node popover with connections", "legend filter hides/shows a type", "Open story button"]
+    - id: "F3-entity-story"
+      name: "An entity's story"
+      preconditions: ["entity exists"]
+      steps:
+        - step_id: "s1"
+          state: "entity_dialog"
+          action: "click an entity chip or a graph node's Open story"
+          expected_outputs:
+            api: [{ endpoint_ref: "op:GetEntityStory", expected_status: 200 }]
+            ui: ["type + mention count + since", "labeled connections", "every entry listed", "Write about <name> inserts a prompt into F1"]
+    - id: "F4-look-back"
+      name: "Look back"
+      preconditions: ["entries exist"]
+      steps:
+        - step_id: "s1"
+          state: "journal_view"
+          action: "open an entry; optionally delete (two-tap confirm)"
+          expected_outputs:
+            api:
+              - { endpoint_ref: "op:GetEntry", expected_status: 200 }
+              - { endpoint_ref: "op:DeleteEntry", expected_status: 200 }
+            ui: ["full text + reflection + entity chips", "two-tap delete removes it"]
+    - id: "F5-progress"
+      name: "Progress"
+      preconditions: []
+      steps:
+        - step_id: "s1"
+          state: "progress_view"
+          action: "view streak ring, level, 14-day chart, achievements"
+          expected_outputs:
+            api: [{ endpoint_ref: "op:GetStats", expected_status: 200 }]
+            ui: ["streak ring", "level + xp bar", "14 bars", "11 achievement badges (locked/unlocked)"]
+
+interfaces:
+  openapi:
+    file: "openapi.yaml"
+    authoritative: true
+    operations:
+      - { op_id: "CreateEntry", auth: "none", errors: [{ status: 400, code: "CONTENT_REQUIRED" }] }
+      - { op_id: "ListEntries", auth: "none" }
+      - { op_id: "GetEntry", auth: "none", errors: [{ status: 404, code: "NOT_FOUND" }] }
+      - { op_id: "DeleteEntry", auth: "none" }
+      - { op_id: "GetEntityStory", auth: "none", errors: [{ status: 404, code: "NOT_FOUND" }] }
+      - { op_id: "GetGraph", auth: "none" }
+      - { op_id: "GetStats", auth: "none" }
+      - { op_id: "GetPrompts", auth: "none" }
+      - { op_id: "DismissPrompt", auth: "none" }
+
+data_formats:
+  json_schema:
+    - { name: "Entry", file: "schemas/Entry.schema.json" }
+    - { name: "Entity", file: "schemas/Entity.schema.json" }
+    - { name: "Edge", file: "schemas/Edge.schema.json" }
+  events:
+    - { name: "extraction_result", file: "schemas/events/extraction_result.schema.json" }
+
+non_functional:
+  performance:
+    budgets:
+      - metric: "save_roundtrip_fallback_ms"
+        target: 500
+        measurement: "acceptance test wall-clock for POST /api/entries with no API key"
+        note: "AI mode is bounded by Anthropic latency and is out of the app's control."
+      - metric: "read_endpoint_ms"
+        target: 200
+        measurement: "acceptance test wall-clock for GET /api/graph and /api/stats on a seeded DB"
+  reliability:
+    principles:
+      - "Every AI call has a deterministic offline fallback; a missing key or network never breaks a request."
+      - "Writes are serialized with a process lock; reads open a fresh connection per request."
+  privacy:
+    pii_logging: "forbidden"
+    telemetry_in_shipped_app: "none"
+    at_scale: "if instrumented later, treat entry content as sensitive; use OpenTelemetry with redaction (see PRD §8)."
+  accessibility:
+    - "Keyboard activation for cards/chips (Enter/Space); visible focus rings; aria-pressed on graph legend filters."
+    - "All animation gated behind prefers-reduced-motion."
+    - "Light and dark themes both meet legible contrast."
+
+evaluation:
+  # Every command here is real and runnable from journal/. CI (and an agent)
+  # must treat all as required-pass. No aspirational gates.
+  commands:
+    - name: "compile"
+      run: "python3 -m py_compile app.py ai.py db.py graph.py gamification.py seed.py"
+    - name: "validate_spec"
+      run: "python3 spec/validate_spec.py spec/product_spec.yaml"
+      note: "requires pyyaml + jsonschema (dev only)"
+    - name: "acceptance"
+      run: "python3 tests/acceptance.py"
+      note: "stdlib only; boots the server on a temp DB, seeds it, asserts the acceptance criteria above, tears down"
+  e2e_manual:
+    tool: "Playwright"
+    note: "The four views + save ritual are verified in a headless browser during development; not wired as a required gate to keep the repo install-free."
+  artifacts_required:
+    - "acceptance test stdout (pass/fail per criterion)"
+
+rollback:
+  strategy: "revert_pr"
+  steps:
+    - "Data model changes: db.py uses CREATE TABLE IF NOT EXISTS; a reverted binary reads the existing SQLite file. Additive columns only."
+    - "Frontend/logic: revert the PR; no migration needed (single static file + stdlib server)."
+    - "Demo data is disposable: `python3 seed.py --reset` rebuilds it."
+
+telemetry:
+  shipped: "none (privacy-first, local)"
+  at_scale:
+    standard: "opentelemetry"
+    events_if_added:
+      - { name: "entry_saved", attributes: ["ai_mode", "word_count_bucket", "new_entities"] }
+      - { name: "prompt_inserted", attributes: ["source"] }
+    redaction: "entry text and titles must never be emitted as attributes"
+
+governance:
+  spec_is_control_plane: true
+  change_rules:
+    - "Changes to autonomy, secrets_policy, or the evaluation protocol require human review."
+    - "Adding a runtime dependency is a forbidden_action — requires explicit approval and a PRD update."
+  definition_of_done:
+    - "All evaluation.commands pass."
+    - "openapi.yaml and schemas/ updated for any interface/data change."
+    - "PRD.md updated when intent, scope, or non-goals change."

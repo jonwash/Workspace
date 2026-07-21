@@ -1,0 +1,302 @@
+openapi: 3.1.0
+info:
+  title: Echo API
+  version: "1.0.0"
+  description: >
+    The HTTP + JSON API served by journal/app.py. Single-user, local-first.
+    All /api responses are application/json. This contract is authoritative for
+    request/response shapes; domain objects reference the JSON Schemas in
+    ./schemas. OpenAPI 3.1 aligns with JSON Schema 2020-12, so those files are
+    reused directly.
+servers:
+  - url: http://localhost:8777
+    description: Local development server (JOURNAL_PORT overrides the port)
+
+paths:
+  /:
+    get:
+      operationId: GetApp
+      summary: Serve the single-page app (index.html)
+      responses:
+        "200":
+          description: The Echo SPA
+          content:
+            text/html: {}
+
+  /api/entries:
+    get:
+      operationId: ListEntries
+      summary: List entries, newest first (max 200)
+      responses:
+        "200":
+          description: Entry list with entity chips per entry
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "./schemas/Entry.schema.json"
+                        - type: object
+                          properties:
+                            preview:
+                              type: string
+                              description: First 240 chars of content
+    post:
+      operationId: CreateEntry
+      summary: Create an entry (runs extraction, graph update, gamification)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1 }
+                title: { type: [string, "null"] }
+                mood: { type: [integer, "null"], minimum: 1, maximum: 5 }
+                entry_date:
+                  type: string
+                  pattern: '^\d{4}-\d{2}-\d{2}$'
+                  description: Optional; defaults to today. Invalid values fall back to today.
+      responses:
+        "200":
+          description: Entry created; extraction + gamification results included
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entry, new_entities, new_achievements, stats]
+                properties:
+                  entry: { $ref: "./schemas/Entry.schema.json" }
+                  reflection: { type: [string, "null"] }
+                  new_entities:
+                    type: integer
+                    description: Count of entities newly created by this entry
+                  new_achievements:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, icon, name]
+                      properties:
+                        key: { type: string }
+                        icon: { type: string, description: Lucide glyph name }
+                        name: { type: string }
+                  stats: { $ref: "#/components/schemas/Stats" }
+        "400":
+          description: Missing/empty content
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/entries/{id}:
+    get:
+      operationId: GetEntry
+      summary: One entry with its entity chips
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The entry
+          content:
+            application/json:
+              schema: { $ref: "./schemas/Entry.schema.json" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      operationId: DeleteEntry
+      summary: Delete an entry (cascades to its mentions)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { const: true } }
+
+  /api/entities/{id}:
+    get:
+      operationId: GetEntityStory
+      summary: An entity plus its connections and every entry that mentions it
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The entity story
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "./schemas/Entity.schema.json"
+                  - type: object
+                    required: [connections, entries]
+                    properties:
+                      connections:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, name, type, label, weight]
+                          properties:
+                            id: { type: integer }
+                            name: { type: string }
+                            type: { $ref: "./schemas/Entity.schema.json#/$defs/entityType" }
+                            label: { type: string }
+                            weight: { type: integer }
+                      entries:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            entry_date: { type: string }
+                            title: { type: [string, "null"] }
+                            mood: { type: [integer, "null"] }
+                            preview: { type: string }
+                      since:
+                        type: [string, "null"]
+                        description: entry_date of the earliest entry mentioning this entity
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/graph:
+    get:
+      operationId: GetGraph
+      summary: The whole knowledge graph as nodes + links
+      responses:
+        "200":
+          description: Graph payload for the force-directed view
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodes, links]
+                properties:
+                  nodes:
+                    type: array
+                    items: { $ref: "./schemas/Entity.schema.json" }
+                  links:
+                    type: array
+                    items: { $ref: "./schemas/Edge.schema.json" }
+
+  /api/stats:
+    get:
+      operationId: GetStats
+      summary: Streak, level, totals, achievements, and 14-day history
+      responses:
+        "200":
+          description: Gamification snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stats" }
+
+  /api/prompts:
+    get:
+      operationId: GetPrompts
+      summary: Refresh and list active journaling prompts
+      responses:
+        "200":
+          description: Active prompts + whether AI generation is available
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prompts, ai]
+                properties:
+                  ai: { type: boolean, description: true when ANTHROPIC_API_KEY is configured }
+                  prompts:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, text, source]
+                      properties:
+                        id: { type: string, description: stable 16-hex id }
+                        text: { type: string }
+                        source:
+                          type: string
+                          enum: [graph, ai, starter]
+                        created_at: { type: string }
+
+  /api/prompts/{id}/dismiss:
+    post:
+      operationId: DismissPrompt
+      summary: Hide a prompt permanently
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]+$' } }
+      responses:
+        "200":
+          description: Dismissed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { const: true } }
+
+components:
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    Stats:
+      type: object
+      required: [streak, level, totals, achievements, history]
+      properties:
+        streak:
+          type: object
+          required: [current, longest]
+          properties:
+            current: { type: integer, minimum: 0 }
+            longest: { type: integer, minimum: 0 }
+        level:
+          type: object
+          required: [level, name, xp, progress]
+          properties:
+            level: { type: integer, minimum: 1, maximum: 11 }
+            name: { type: string }
+            xp: { type: integer, minimum: 0 }
+            next_level_xp: { type: [integer, "null"] }
+            progress: { type: number, minimum: 0, maximum: 1 }
+        totals:
+          type: object
+          required: [entries, entities, relationships, words]
+          properties:
+            entries: { type: integer }
+            entities: { type: integer }
+            relationships: { type: integer }
+            words: { type: integer }
+        achievements:
+          type: array
+          items:
+            type: object
+            required: [key, icon, name, description, unlocked]
+            properties:
+              key: { type: string }
+              icon: { type: string }
+              name: { type: string }
+              description: { type: string }
+              unlocked: { type: boolean }
+              unlocked_at: { type: [string, "null"] }
+        history:
+          type: array
+          description: Exactly 14 entries, oldest to newest
+          items:
+            type: object
+            required: [date, count]
+            properties:
+              date: { type: string }
+              count: { type: integer, minimum: 0 }
