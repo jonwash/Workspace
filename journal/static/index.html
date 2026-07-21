@@ -130,6 +130,16 @@ nav button.active {
   color: var(--accent-strong); background: var(--accent-tint);
   border-color: color-mix(in oklab, var(--accent) 35%, transparent);
 }
+@media (max-width: 640px) {
+  header { padding: 10px 16px 8px; gap: 10px; }
+  .wordmark { font-size: 22px; }
+  #themeBtn { margin-left: auto; }
+  nav { order: 4; width: 100%; margin-left: 0; justify-content: space-between; }
+  nav button { padding: 9px 12px; }
+  main { padding: 20px 14px 56px; }
+  #view-graph-wrap { padding: 0 14px; }
+  #graphCanvas { height: 420px; }
+}
 
 /* -------- layout -------- */
 main { max-width: var(--page-max); margin: 0 auto; padding: 28px 20px 64px; }
@@ -164,6 +174,10 @@ h2 { font-family: var(--font-serif); font-weight: 500; font-size: var(--size-tit
 .btn:active { transform: scale(.98); }
 .btn:disabled { opacity: .45; cursor: default; filter: none; }
 .btn--ghost { background: transparent; color: var(--accent-strong); }
+.btn--danger { background: transparent; border-color: var(--line-1); color: var(--danger); height: 36px; padding: 0 16px; font-size: 14px; }
+.btn--danger.confirm { background: var(--danger-tint); border-color: transparent; }
+.btn .spin { animation: spin 1.2s linear infinite; display: inline-flex; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .iconbtn {
   width: var(--tap-min); height: var(--tap-min); display: inline-flex; align-items: center;
   justify-content: center; border-radius: var(--radius-full); border: 1px solid transparent;
@@ -218,6 +232,8 @@ input[type="date"].field { width: auto; }
 .chip--sm { padding: 2px 10px; font-size: 12px; }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--entity-other); }
 .chip--sm .dot { width: 6px; height: 6px; }
+.chip[data-eid] { cursor: pointer; transition: box-shadow var(--dur-quick) var(--ease-calm); }
+.chip[data-eid]:hover { box-shadow: var(--shadow-1); }
 .chip .count { font-family: var(--font-mono); font-weight: 400; font-size: 11px; opacity: .75; }
 .chip--person { background: var(--entity-person-tint); color: var(--entity-person-ink); border-color: color-mix(in oklab, var(--entity-person) 25%, transparent); }
 .chip--person .dot { background: var(--entity-person); }
@@ -323,7 +339,7 @@ input[type="date"].field { width: auto; }
 /* -------- graph -------- */
 #graphWrap { position: relative; }
 #graphCanvas {
-  width: 100%; height: 540px; display: block;
+  width: 100%; height: 540px; display: block; touch-action: none;
   border-radius: var(--radius-m); background: var(--surface-card);
   border: 1px solid var(--line-2);
 }
@@ -374,6 +390,21 @@ dialog .fulltext { font-family: var(--font-serif); font-size: var(--size-entry);
 .metarow { display: flex; align-items: center; gap: 10px; }
 .metadate { font-size: var(--size-meta); font-weight: 600; letter-spacing: var(--tracking-meta); text-transform: uppercase; color: var(--ink-3); }
 .metawords { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+
+/* entity story */
+.story-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.story-name { font-family: var(--font-serif); font-size: 28px; font-weight: 500; }
+.story-count { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+.story-row {
+  display: block; width: 100%; text-align: left; font: inherit; color: inherit;
+  background: var(--paper-1); border: none; border-radius: var(--radius-m);
+  padding: 12px 14px; margin-top: 8px; cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-calm);
+}
+.story-row:hover { background: var(--paper-2); }
+.story-row .srtitle { font-family: var(--font-serif); font-size: 16px; margin-top: 2px; }
+.story-rel { color: var(--ink-2); font-size: var(--size-caption); }
+.story-rel span { color: var(--ink-3); }
 </style>
 </head>
 <body>
@@ -414,6 +445,14 @@ dialog .fulltext { font-family: var(--font-serif); font-size: var(--size-entry);
 <main>
   <!-- WRITE -->
   <section id="view-write" class="view active">
+    <div class="card card--wash" id="firstRun" style="display:none;padding:22px 24px">
+      <div class="eyebrow" style="margin-bottom:10px">Welcome to Echo</div>
+      <p style="font-family:var(--font-serif);font-size:var(--size-prompt);line-height:1.5">
+        Write a few lines about your day below. Echo reads each entry for the people, places, and
+        projects in your life, maps them into <b>your world</b>, and writes a short reflection back.
+        Keep it up and your world grows — and Echo starts knowing what to ask you next.
+      </p>
+    </div>
     <div class="card card--wash" style="padding:18px 20px">
       <h2>Need a spark?</h2>
       <div id="promptList"><div class="empty">Gathering prompts…</div></div>
@@ -481,6 +520,7 @@ dialog .fulltext { font-family: var(--font-serif); font-size: var(--size-entry);
 </div>
 
 <dialog id="entryDialog"></dialog>
+<dialog id="entityDialog"></dialog>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -519,8 +559,14 @@ applyTheme(savedTheme || (matchMedia('(prefers-color-scheme: dark)').matches ? '
 function chipHTML(e, sm) {
   const t = ENTITY_TYPES.includes(e.type) ? e.type : 'other';
   const count = e.mention_count != null && e.mention_count > 1 ? `<span class="count">${e.mention_count}</span>` : '';
-  return `<span class="chip chip--${t} ${sm ? 'chip--sm' : ''}"><span class="dot"></span>${esc(e.name)}${count}</span>`;
+  const attrs = e.id != null ? ` data-eid="${e.id}" role="button" tabindex="0" title="Open ${esc(e.name)}'s story"` : '';
+  return `<span class="chip chip--${t} ${sm ? 'chip--sm' : ''}"${attrs}><span class="dot"></span>${esc(e.name)}${count}</span>`;
 }
+// any chip with an id opens that entity's story, wherever it appears
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.chip[data-eid]');
+  if (chip) openEntity(+chip.dataset.eid);
+});
 
 function streakHTML(days, size, label) {
   const rings = Math.min(5, Math.max(1, Math.ceil(days / 7)));
@@ -565,6 +611,8 @@ function toast(msg, { detail = '', icon = 'check', ember = false } = {}, ms = 36
 function updateStreak(stats) {
   if (!stats?.streak) return;
   $('#headerStreak').innerHTML = streakHTML(stats.streak.current, 40, false);
+  // the welcome card only appears before the first entry exists
+  if (stats.totals) $('#firstRun').style.display = stats.totals.entries === 0 ? '' : 'none';
 }
 
 /* ---------- navigation ---------- */
@@ -598,11 +646,13 @@ $('#content').addEventListener('input', () => {
   $('#wordCount').textContent = n + ' words';
 });
 
+const SAVE_LABEL = $('#saveBtn').innerHTML;
 $('#saveBtn').onclick = async () => {
   const content = $('#content').value.trim();
   if (!content) return toast('Write a line first', { icon: 'feather' });
   const btn = $('#saveBtn');
   btn.disabled = true;
+  btn.innerHTML = `<span class="spin">${ICON('sparkles', 17)}</span>Reading your words…`;
   try {
     const res = await api('/api/entries', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -624,10 +674,20 @@ $('#saveBtn').onclick = async () => {
     (res.new_achievements || []).forEach((a, i) =>
       setTimeout(() => toast(`${esc(a.name)} unlocked`, { icon: 'award', ember: true }), 1000 * (i + 1)));
     loadPrompts();
+  } catch (err) {
+    toast("Couldn't reach the journal — your words are still here", { icon: 'x' }, 5000);
   } finally {
     btn.disabled = false;
+    btn.innerHTML = SAVE_LABEL;
   }
 };
+// Cmd/Ctrl+Enter saves from anywhere in the editor
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && $('#view-write').classList.contains('active')) {
+    e.preventDefault();
+    $('#saveBtn').click();
+  }
+});
 
 /* ---------- prompts ---------- */
 async function loadPrompts() {
@@ -705,8 +765,65 @@ async function openEntry(id) {
       <div class="eyebrow">${ICON('sparkles', 13)}A reflection</div>
       <div class="text">${esc(e.reflection)}</div>
     </div>` : ''}
-    ${e.entities.length ? `<div class="chips">${e.entities.map(x => chipHTML(x, true)).join('')}</div>` : ''}`;
+    ${e.entities.length ? `<div class="chips">${e.entities.map(x => chipHTML(x, true)).join('')}</div>` : ''}
+    <div class="row" style="justify-content:flex-end;margin-top:18px">
+      <button class="btn btn--danger" id="deleteEntryBtn">Delete entry</button>
+    </div>`;
   d.showModal();
+  const del = $('#deleteEntryBtn');
+  del.onclick = async () => {
+    if (!del.classList.contains('confirm')) {
+      del.classList.add('confirm');
+      del.textContent = 'Delete forever?';
+      setTimeout(() => { del.classList.remove('confirm'); del.textContent = 'Delete entry'; }, 3500);
+      return;
+    }
+    await api('/api/entries/' + id, { method: 'DELETE' });
+    d.close();
+    toast('Entry deleted');
+    loadEntries();
+    api('/api/stats').then(updateStreak);
+  };
+}
+
+/* ---------- entity story ---------- */
+async function openEntity(id) {
+  const e = await api('/api/entities/' + id);
+  if (e.error) return;
+  $('#entryDialog').close();
+  const d = $('#entityDialog');
+  const t = ENTITY_TYPES.includes(e.type) ? e.type : 'other';
+  d.innerHTML = `
+    <button class="close" onclick="this.closest('dialog').close()" aria-label="Close">${ICON('x', 16)}</button>
+    <div class="story-head">
+      <span class="story-name">${esc(e.name)}</span>
+      <span class="chip chip--${t} chip--sm"><span class="dot"></span>${t}</span>
+      <span class="story-count">mentioned ${e.mention_count} time${e.mention_count === 1 ? '' : 's'}${e.since ? ' · since ' + prettyDate(e.since) : ''}</span>
+    </div>
+    ${e.connections.length ? `
+      <div class="eyebrow" style="margin-top:18px">Connections</div>
+      <div style="margin-top:8px">${e.connections.map(c =>
+        `<div class="story-rel"><span>${esc(c.label)}</span> ${chipHTML(c, true)}</div>`).join('')}</div>` : ''}
+    <div class="eyebrow" style="margin-top:18px">In your entries</div>
+    ${e.entries.map(en => `
+      <button class="story-row" data-entry="${en.id}">
+        <span class="metadate">${prettyDate(en.entry_date)}</span>
+        ${en.mood ? `<span class="mooddot m${en.mood}" style="display:inline-block;margin-left:8px"></span>` : ''}
+        <div class="srtitle">${esc(en.title || en.preview)}</div>
+      </button>`).join('')}
+    <div class="row" style="justify-content:flex-end;margin-top:18px">
+      <button class="btn btn--ghost" id="writeAboutBtn">Write about ${esc(e.name)}</button>
+    </div>`;
+  d.showModal();
+  d.querySelectorAll('.story-row').forEach(el => el.onclick = () => { d.close(); openEntry(el.dataset.entry); });
+  $('#writeAboutBtn').onclick = () => {
+    d.close();
+    document.querySelector('nav button[data-view="write"]').click();
+    const ta = $('#content');
+    ta.value = (ta.value ? ta.value + '\n\n' : '') + `What's the latest with ${e.name}?\n`;
+    ta.focus();
+    ta.dispatchEvent(new Event('input'));
+  };
 }
 
 /* ---------- graph ---------- */
@@ -730,7 +847,7 @@ async function loadGraph() {
   const data = await api('/api/graph');
   const canvas = $('#graphCanvas');
   const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth || 880, H = 540;
+  const W = canvas.clientWidth || 880, H = canvas.clientHeight || 540;
   canvas.width = W * dpr; canvas.height = H * dpr;
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
@@ -811,25 +928,44 @@ async function loadGraph() {
     const r = canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
-  const nodeAt = p => nodes.find(n => (n.x - p.x) ** 2 + (n.y - p.y) ** 2 < (n.r + 4) ** 2);
-  canvas.onmousedown = e => { dragging = nodeAt(pos(e)); if (dragging) alpha = Math.max(alpha, .3); };
-  canvas.onmouseup = () => dragging = null;
-  canvas.onmousemove = e => {
-    const p = pos(e);
-    if (dragging) { dragging.x = p.x; dragging.y = p.y; alpha = Math.max(alpha, .1); }
-    hover = nodeAt(p);
-    canvas.style.cursor = hover ? 'pointer' : 'default';
+  const nodeAt = p => nodes.find(n => (n.x - p.x) ** 2 + (n.y - p.y) ** 2 < (n.r + 8) ** 2);
+  const showInfo = node => {
     const info = $('#graphInfo');
-    if (hover) {
-      const deg = links.filter(l => l.source === hover.id || l.target === hover.id);
-      info.style.display = 'block';
-      info.innerHTML = `<div class="gname">${esc(hover.name)} <span class="gtype">${hover.type}</span></div>
-        <div class="gcount">mentioned ${hover.mention_count} time${hover.mention_count === 1 ? '' : 's'}</div>
-        ${deg.slice(0, 5).map(l => {
-          const other = byId[l.source === hover.id ? l.target : l.source];
-          return `<div class="grel"><span>${esc(l.label)}</span> ${esc(other.name)}</div>`;
-        }).join('') || '<div class="grel"><span>no connections yet</span></div>'}`;
-    } else info.style.display = 'none';
+    if (!node) { info.style.display = 'none'; return; }
+    const deg = links.filter(l => l.source === node.id || l.target === node.id);
+    info.style.display = 'block';
+    info.innerHTML = `<div class="gname">${esc(node.name)} <span class="gtype">${node.type}</span></div>
+      <div class="gcount">mentioned ${node.mention_count} time${node.mention_count === 1 ? '' : 's'}</div>
+      ${deg.slice(0, 5).map(l => {
+        const other = byId[l.source === node.id ? l.target : l.source];
+        return `<div class="grel"><span>${esc(l.label)}</span> ${esc(other.name)}</div>`;
+      }).join('') || '<div class="grel"><span>no connections yet</span></div>'}
+      <button class="btn btn--ghost" style="height:32px;padding:0 10px;font-size:13px;margin-top:6px"
+        onclick="openEntity(${node.id})">Open story</button>`;
+  };
+  let moved = false;
+  canvas.onpointerdown = e => {
+    canvas.setPointerCapture(e.pointerId);
+    dragging = nodeAt(pos(e));
+    moved = false;
+    if (dragging) { alpha = Math.max(alpha, .3); hover = dragging; showInfo(hover); }
+  };
+  canvas.onpointerup = e => {
+    canvas.releasePointerCapture(e.pointerId);
+    // tap on empty space (no drag) clears the popover — matters on touch,
+    // where there is no hover-out to hide it
+    if (!dragging && !moved) { hover = nodeAt(pos(e)); showInfo(hover); }
+    dragging = null;
+  };
+  canvas.onpointermove = e => {
+    const p = pos(e);
+    moved = true;
+    if (dragging) { dragging.x = p.x; dragging.y = p.y; alpha = Math.max(alpha, .1); return; }
+    if (e.pointerType === 'mouse') {
+      hover = nodeAt(p);
+      canvas.style.cursor = hover ? 'pointer' : 'default';
+      showInfo(hover);
+    }
   };
 
   if (!nodes.length) {

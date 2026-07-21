@@ -81,6 +81,34 @@ def get_entry(conn, entry_id):
     return entry
 
 
+def get_entity_story(conn, entity_id):
+    """An entity plus its connections and every entry that mentions it."""
+    row = conn.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone()
+    if not row:
+        return None
+    entity = dict(row)
+    entity["connections"] = [dict(r) for r in conn.execute("""
+        SELECT CASE WHEN e.source_id = ? THEN t.name ELSE s.name END AS name,
+               CASE WHEN e.source_id = ? THEN e.target_id ELSE e.source_id END AS id,
+               CASE WHEN e.source_id = ? THEN t.type ELSE s.type END AS type,
+               e.label, e.weight
+        FROM edges e
+        JOIN entities s ON s.id = e.source_id
+        JOIN entities t ON t.id = e.target_id
+        WHERE e.source_id = ? OR e.target_id = ?
+        ORDER BY e.weight DESC LIMIT 8""", (entity_id,) * 5)]
+    entity["entries"] = [dict(r) for r in conn.execute("""
+        SELECT en.id, en.entry_date, en.title, en.mood,
+               substr(en.content, 1, 160) AS preview
+        FROM entity_mentions m
+        JOIN entries en ON en.id = m.entry_id
+        WHERE m.entity_id = ?
+        ORDER BY en.entry_date DESC LIMIT 20""", (entity_id,))]
+    # "since" is the earliest entry that actually mentions this entity
+    entity["since"] = entity["entries"][-1]["entry_date"] if entity["entries"] else None
+    return entity
+
+
 def list_entries(conn):
     rows = conn.execute("""
         SELECT id, created_at, entry_date, title, mood, word_count,
@@ -143,6 +171,11 @@ class Handler(BaseHTTPRequestHandler):
                 entry = get_entry(conn, int(match.group(1)))
                 return self._json(entry or {"error": "not found"},
                                   200 if entry else 404)
+            match = re.fullmatch(r"/api/entities/(\d+)", path)
+            if match:
+                story = get_entity_story(conn, int(match.group(1)))
+                return self._json(story or {"error": "not found"},
+                                  200 if story else 404)
             if path == "/api/graph":
                 return self._json(graph.get_graph(conn))
             if path == "/api/stats":
