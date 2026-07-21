@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Echo — journal your world</title>
+<meta name="description" content="A private AI journal that maps the people, places, and projects in your life into a living knowledge graph — and uses it to know what to ask you next.">
+<meta name="theme-color" content="#FAF7F0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161210" media="(prefers-color-scheme: dark)">
+<meta property="og:title" content="Echo — journal your world">
+<meta property="og:description" content="A private AI journal that grows a knowledge graph of your life and reflects it back to you.">
+<meta property="og:type" content="website">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235D5546' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.67 19a2 2 0 0 0 1.416-.588l6.154-6.172a6 6 0 0 0-8.49-8.49L5.586 9.914A2 2 0 0 0 5 11.328V18a1 1 0 0 0 1 1z'/%3E%3Cpath d='M16 8 2 22'/%3E%3Cpath d='M17.5 15H9'/%3E%3C/svg%3E">
 <style>
 /* ============================ Echo design system ============================
@@ -294,6 +301,13 @@ input[type="date"].field { width: auto; }
 .streak.zero .num { color: var(--ink-3); }
 .streak .l1 { font-size: var(--size-caption); font-weight: 600; }
 .streak .l2 { font-size: 12px; color: var(--ink-3); }
+.streak.pulse .ringwrap { animation: emberPulse var(--dur-ritual) var(--ease-calm); border-radius: 50%; }
+@keyframes emberPulse {
+  0% { box-shadow: 0 0 0 0 transparent; }
+  40% { box-shadow: var(--glow-ember); transform: scale(1.08); }
+  100% { box-shadow: 0 0 0 0 transparent; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .streak.pulse .ringwrap { animation: none; } }
 
 /* -------- ritual: reflection -------- */
 .reflection {
@@ -354,9 +368,18 @@ input[type="date"].field { width: auto; }
 #graphInfo .gcount { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
 #graphInfo .grel { color: var(--ink-2); margin-top: 2px; }
 #graphInfo .grel span { color: var(--ink-3); }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; font-size: var(--size-caption); color: var(--ink-2); }
-.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; font-size: var(--size-caption); color: var(--ink-2); }
+.legend button {
+  display: inline-flex; align-items: center; gap: 5px; font: inherit; color: var(--ink-2);
+  background: transparent; border: 1px solid var(--line-2); border-radius: var(--radius-full);
+  padding: 4px 10px; cursor: pointer; transition: background var(--dur-quick) var(--ease-calm), opacity var(--dur-quick) var(--ease-calm);
+}
+.legend button:hover { background: var(--paper-1); }
+.legend button.off { opacity: .4; }
+.legend button.off i { background: var(--ink-3) !important; }
 .legend i { width: 8px; height: 8px; border-radius: 50%; font-style: normal; }
+.legend .hint { border: none; padding: 4px 2px; cursor: default; color: var(--ink-3); }
+.legend .hint:hover { background: transparent; }
 
 /* -------- progress -------- */
 .xpbar { height: 10px; background: var(--paper-2); border-radius: var(--radius-full); overflow: hidden; margin: 12px 0 6px; }
@@ -376,6 +399,11 @@ input[type="date"].field { width: auto; }
 /* -------- misc -------- */
 .row { display: flex; gap: 12px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
 .empty { color: var(--ink-3); font-family: var(--font-serif); font-style: italic; padding: 8px 0; }
+.skeleton { height: 62px; border-radius: var(--radius-m); margin-bottom: 8px;
+  background: linear-gradient(100deg, var(--paper-1) 30%, var(--paper-2) 50%, var(--paper-1) 70%);
+  background-size: 200% 100%; animation: shimmer 1.4s var(--ease-calm) infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
 .hint { color: var(--ink-3); font-size: var(--size-caption); }
 #wordCount { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
 dialog {
@@ -383,7 +411,14 @@ dialog {
   border-radius: var(--radius-l); box-shadow: var(--shadow-2);
   padding: 28px; max-width: var(--page-max); width: 92vw;
 }
-dialog::backdrop { background: rgba(22,18,16,.45); }
+dialog::backdrop { background: rgba(22,18,16,.45); backdrop-filter: blur(2px); }
+@media (max-width: 640px) {
+  dialog {
+    width: 100vw; max-width: 100vw; margin: 0; margin-top: auto;
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
+    max-height: 88vh; overflow-y: auto;
+  }
+}
 dialog .close { float: right; border: none; background: none; color: var(--ink-3); cursor: pointer; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 dialog .close:hover { background: var(--paper-1); }
 dialog .fulltext { font-family: var(--font-serif); font-size: var(--size-entry); line-height: var(--leading-entry); white-space: pre-wrap; margin-top: 14px; }
@@ -455,7 +490,7 @@ dialog .fulltext { font-family: var(--font-serif); font-size: var(--size-entry);
     </div>
     <div class="card card--wash" style="padding:18px 20px">
       <h2>Need a spark?</h2>
-      <div id="promptList"><div class="empty">Gathering prompts…</div></div>
+      <div id="promptList"><div class="skeleton"></div><div class="skeleton" style="width:85%"></div></div>
     </div>
     <div class="card" style="padding:24px">
       <h2>Today's entry</h2>
@@ -567,6 +602,13 @@ document.addEventListener('click', e => {
   const chip = e.target.closest('.chip[data-eid]');
   if (chip) openEntity(+chip.dataset.eid);
 });
+// keyboard activation for role="button" elements (entry cards, chips)
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][tabindex]')) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
 
 function streakHTML(days, size, label) {
   const rings = Math.min(5, Math.max(1, Math.ceil(days / 7)));
@@ -608,9 +650,16 @@ function toast(msg, { detail = '', icon = 'check', ember = false } = {}, ms = 36
   }, ms);
 }
 
+let lastStreak = null;
 function updateStreak(stats) {
   if (!stats?.streak) return;
+  const grew = lastStreak != null && stats.streak.current > lastStreak;
+  lastStreak = stats.streak.current;
   $('#headerStreak').innerHTML = streakHTML(stats.streak.current, 40, false);
+  if (grew) {
+    const ring = $('#headerStreak .streak');
+    if (ring) { ring.classList.add('pulse'); setTimeout(() => ring.classList.remove('pulse'), 700); }
+  }
   // the welcome card only appears before the first entry exists
   if (stats.totals) $('#firstRun').style.display = stats.totals.entries === 0 ? '' : 'none';
 }
@@ -839,9 +888,16 @@ function cssColor(varName) {
 
 const LEGEND_LABELS = { person: 'people', place: 'places', organization: 'orgs',
   project: 'projects', activity: 'activities', event: 'events', other: 'other' };
+const hiddenTypes = new Set();
 $('#graphLegend').innerHTML = ENTITY_TYPES.map(t =>
-  `<span><i style="background:var(--entity-${t})"></i>${LEGEND_LABELS[t]}</span>`
-).join('');
+  `<button data-type="${t}" aria-pressed="true"><i style="background:var(--entity-${t})"></i>${LEGEND_LABELS[t]}</button>`
+).join('') + '<span class="hint">tap to filter</span>';
+$('#graphLegend').querySelectorAll('button').forEach(btn => btn.onclick = () => {
+  const t = btn.dataset.type;
+  if (hiddenTypes.has(t)) { hiddenTypes.delete(t); btn.classList.remove('off'); btn.setAttribute('aria-pressed', 'true'); }
+  else { hiddenTypes.add(t); btn.classList.add('off'); btn.setAttribute('aria-pressed', 'false'); }
+  if ($('#view-graph').classList.contains('active')) loadGraph();
+});
 
 async function loadGraph() {
   const data = await api('/api/graph');
@@ -857,7 +913,7 @@ async function loadGraph() {
   const cLine = cssColor('--line-1'), cEmber = cssColor('--ember'),
         cInk = cssColor('--ink-2'), cInk3 = cssColor('--ink-3');
 
-  const nodes = data.nodes.map(n => ({
+  const nodes = data.nodes.filter(n => !hiddenTypes.has(n.type)).map(n => ({
     ...n,
     x: W / 2 + (Math.random() - .5) * W * .6,
     y: H / 2 + (Math.random() - .5) * H * .6,
