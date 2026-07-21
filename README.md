@@ -134,6 +134,5 @@ frontend. Details in [`journal/README.md`](journal/README.md).
 ---
 
 > **Note on this repository:** the hackathon project is **Echo**, in
-> [`journal/`](journal/). The other top-level folders (`directives/`,
-> `execution/`, and the `*.json` files) belong to an earlier, unrelated
-> lead-generation experiment and are not part of this submission.
+> [`journal/`](journal/). An earlier, unrelated lead-generation experiment has
+> been moved to [`legacy/`](legacy/) and is not part of this submission.
